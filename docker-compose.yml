@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OSRM_BASE=http://osrm:5000
+    depends_on:
+      - osrm
+    restart: unless-stopped
+  osrm:
+    image: osrm/osrm-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./osrm-data:/data
+    command: osrm-routed --algorithm mld /data/map.osrm
+    restart: unless-stopped
