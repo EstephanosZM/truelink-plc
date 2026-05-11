@@ -1,5 +1,5 @@
 // ── Replace with your FastAPI URL if different ────────────────────────────────
-const API_BASE = 'http://localhost:8000'
+const API_BASE = 'https://truelink-api.onrender.com'
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function post<T>(path: string, body: unknown): Promise<T> {
