@@ -26,7 +26,14 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("truelink-api")
 
 app = FastAPI(title="True Link PLC Route API", version="1.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_origin_regex=".*",
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
