@@ -17,12 +17,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [whError,  setWhError]  = useState('')
 
   // Reps
-  const [repName,     setRepName]     = useState('')
-  const [repPhone,    setRepPhone]    = useState('')
-  const [repTerrId,   setRepTerrId]   = useState('')
-  const [repErr,      setRepErr]      = useState('')
-  const [repSaving,   setRepSaving]   = useState(false)
-  const [editingRep,  setEditingRep]  = useState<SalesRep | null>(null)
+  const [repName,    setRepName]    = useState('')
+  const [repPhone,   setRepPhone]   = useState('')
+  const [repTerrId,  setRepTerrId]  = useState('')
+  const [repPin,     setRepPin]     = useState('')
+  const [repTarget,  setRepTarget]  = useState('')
+  const [repErr,     setRepErr]     = useState('')
+  const [repSaving,  setRepSaving]  = useState(false)
+  const [editingRep, setEditingRep] = useState<SalesRep | null>(null)
+  const [showPin,    setShowPin]    = useState<Record<string, boolean>>({})
 
   const saveWarehouse = async () => {
     const lat = parseFloat(whLat)
@@ -39,36 +42,48 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setSettings(data); onClose()
   }
 
+  const validatePin = (pin: string) => {
+    if (!pin) return true // optional
+    if (!/^\d{4}$/.test(pin)) return false
+    return true
+  }
+
   const addRep = async () => {
     if (!repName.trim()) return setRepErr('Name is required')
+    if (repPin && !validatePin(repPin)) return setRepErr('PIN must be exactly 4 digits')
     setRepSaving(true); setRepErr('')
     const payload = {
-      name: repName.trim(),
-      phone_number: repPhone.trim() || null,
-      territory_id: repTerrId || null,
+      name:           repName.trim(),
+      phone_number:   repPhone.trim() || null,
+      territory_id:   repTerrId || null,
+      pin_code:       repPin || null,
+      monthly_target: parseFloat(repTarget) || 0,
     }
     const { data, error } = await supabase
       .from('sales_representatives').insert(payload).select().single()
     setRepSaving(false)
     if (error) { setRepErr(error.message); return }
     setSalesReps([...salesReps, data])
-    setRepName(''); setRepPhone(''); setRepTerrId('')
+    setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget('')
   }
 
   const updateRep = async () => {
     if (!editingRep || !repName.trim()) return
+    if (repPin && !validatePin(repPin)) return setRepErr('PIN must be exactly 4 digits')
     setRepSaving(true); setRepErr('')
     const payload = {
-      name: repName.trim(),
-      phone_number: repPhone.trim() || null,
-      territory_id: repTerrId || null,
+      name:           repName.trim(),
+      phone_number:   repPhone.trim() || null,
+      territory_id:   repTerrId || null,
+      pin_code:       repPin || null,
+      monthly_target: parseFloat(repTarget) || 0,
     }
     const { data, error } = await supabase
       .from('sales_representatives').update(payload).eq('id', editingRep.id).select().single()
     setRepSaving(false)
     if (error) { setRepErr(error.message); return }
     setSalesReps(salesReps.map((r) => r.id === data.id ? data : r))
-    setEditingRep(null); setRepName(''); setRepPhone(''); setRepTerrId('')
+    setEditingRep(null); setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget('')
   }
 
   const startEdit = (rep: SalesRep) => {
@@ -76,10 +91,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setRepName(rep.name)
     setRepPhone(rep.phone_number || '')
     setRepTerrId(rep.territory_id || '')
+    setRepPin((rep as SalesRep & { pin_code?: string }).pin_code || '')
+    setRepTarget(String(rep.monthly_target || ''))
+    setRepErr('')
   }
 
   const cancelEdit = () => {
-    setEditingRep(null); setRepName(''); setRepPhone(''); setRepTerrId('')
+    setEditingRep(null)
+    setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget('')
+    setRepErr('')
   }
 
   const deleteRep = async (id: string) => {
@@ -101,20 +121,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const getTerritoryName = (id: string | null) =>
+    territories.find((t) => t.id === id)?.name || '—'
+
   const tabs = [
     { key: 'warehouse',   label: 'Warehouse'   },
     { key: 'reps',        label: 'Sales Reps'  },
     { key: 'territories', label: 'Territories' },
   ]
 
-  const getTerritoryName = (id: string | null) =>
-    territories.find((t) => t.id === id)?.name || '—'
-
   return (
-    <div
-      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h2 className="font-semibold text-slate-900">Settings</h2>
@@ -125,9 +143,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key as typeof tab)}
               className={`px-5 py-2.5 text-sm font-medium transition-colors ${
-                tab === t.key
-                  ? 'border-b-2 border-blue-600 text-blue-600'
-                  : 'text-slate-500 hover:text-slate-700'
+                tab === t.key ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'
               }`}>
               {t.label}
             </button>
@@ -136,7 +152,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-6">
 
-          {/* ── Warehouse ── */}
+          {/* Warehouse */}
           {tab === 'warehouse' && (
             <div className="space-y-4">
               <div>
@@ -147,14 +163,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Latitude</label>
-                  <input value={whLat} onChange={(e) => setWhLat(e.target.value)}
-                    placeholder="9.0300"
+                  <input value={whLat} onChange={(e) => setWhLat(e.target.value)} placeholder="9.0300"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Longitude</label>
-                  <input value={whLon} onChange={(e) => setWhLon(e.target.value)}
-                    placeholder="38.7400"
+                  <input value={whLon} onChange={(e) => setWhLon(e.target.value)} placeholder="38.7400"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
@@ -166,31 +180,53 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* ── Sales Reps ── */}
+          {/* Sales Reps */}
           {tab === 'reps' && (
             <div className="space-y-4">
-              {/* Add / Edit form */}
               <div className="bg-slate-50 rounded-lg p-4 space-y-3">
                 <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                   {editingRep ? `Editing: ${editingRep.name}` : 'Add Sales Rep'}
                 </p>
+
                 <input value={repName} onChange={(e) => setRepName(e.target.value)}
                   placeholder="Full name *"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
                 <input value={repPhone} onChange={(e) => setRepPhone(e.target.value)}
-                  placeholder="Phone (optional)"
+                  placeholder="Phone number (optional)"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">4-Digit PIN *</label>
+                    <input
+                      value={repPin}
+                      onChange={(e) => setRepPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="e.g. 1234"
+                      maxLength={4}
+                      type="password"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 tracking-widest"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Monthly Target (ETB)</label>
+                    <input value={repTarget} onChange={(e) => setRepTarget(e.target.value)}
+                      placeholder="e.g. 50000" type="number"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Default Territory (optional)</label>
                   <select value={repTerrId} onChange={(e) => setRepTerrId(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                     <option value="">No default territory</option>
-                    {territories.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
+                    {territories.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
+
                 {repErr && <p className="text-sm text-red-600">{repErr}</p>}
+
                 <div className="flex gap-2">
                   {editingRep && (
                     <button onClick={cancelEdit}
@@ -198,9 +234,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       Cancel
                     </button>
                   )}
-                  <button
-                    onClick={editingRep ? updateRep : addRep}
-                    disabled={repSaving}
+                  <button onClick={editingRep ? updateRep : addRep} disabled={repSaving}
                     className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                     {repSaving ? '…' : editingRep ? 'Update Rep' : '+ Add Rep'}
                   </button>
@@ -209,28 +243,46 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
               {/* Rep list */}
               <div className="divide-y divide-slate-100">
-                {salesReps.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">{r.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {r.phone_number && <span className="mr-2">📞 {r.phone_number}</span>}
-                        {r.territory_id && <span>📍 {getTerritoryName(r.territory_id)}</span>}
-                        {!r.phone_number && !r.territory_id && 'No details'}
-                      </p>
+                {salesReps.map((r) => {
+                  const rep = r as SalesRep & { pin_code?: string }
+                  return (
+                    <div key={r.id} className="flex items-center justify-between py-3 gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-900">{r.name}</p>
+                        <div className="flex items-center gap-3 mt-0.5">
+                          {r.phone_number && <p className="text-xs text-slate-500">📞 {r.phone_number}</p>}
+                          {r.territory_id && <p className="text-xs text-slate-500">📍 {getTerritoryName(r.territory_id)}</p>}
+                          {rep.pin_code && (
+                            <div className="flex items-center gap-1">
+                              <p className="text-xs text-slate-500">
+                                PIN: {showPin[r.id] ? rep.pin_code : '••••'}
+                              </p>
+                              <button
+                                onClick={() => setShowPin((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
+                                className="text-xs text-slate-400 hover:text-slate-600"
+                              >
+                                {showPin[r.id] ? '🙈' : '👁'}
+                              </button>
+                            </div>
+                          )}
+                          {!rep.pin_code && (
+                            <p className="text-xs text-amber-500">⚠ No PIN set</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => startEdit(r)}
+                          className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">
+                          Edit
+                        </button>
+                        <button onClick={() => deleteRep(r.id)}
+                          className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => startEdit(r)}
-                        className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">
-                        Edit
-                      </button>
-                      <button onClick={() => deleteRep(r.id)}
-                        className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
                 {!salesReps.length && (
                   <p className="text-sm text-slate-400 py-4 text-center">No sales reps added yet</p>
                 )}
@@ -238,12 +290,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* ── Territories (proximity) ── */}
+          {/* Territories */}
           {tab === 'territories' && (
             <div className="space-y-3">
               <p className="text-xs text-slate-500 mb-3">
-                Set the GPS proximity radius for each territory. Sales reps must be within
-                this distance to check in at an outlet.
+                Set the GPS proximity radius for each territory.
               </p>
               {territories.map((t) => {
                 const ps = proximitySettings.find((p) => p.territory_id === t.id)
@@ -254,20 +305,16 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       <span className="text-sm font-medium text-slate-900">{t.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={10} max={1000}
+                      <input type="number" min={10} max={1000}
                         defaultValue={ps?.radius_meters ?? 100}
                         onBlur={(e) => updateRadius(t.id, parseInt(e.target.value) || 100)}
-                        className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                        className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       <span className="text-xs text-slate-500">m</span>
                     </div>
                   </div>
                 )
               })}
-              {!territories.length && (
-                <p className="text-sm text-slate-400 py-4 text-center">No territories yet</p>
-              )}
+              {!territories.length && <p className="text-sm text-slate-400 py-4 text-center">No territories yet</p>}
             </div>
           )}
         </div>

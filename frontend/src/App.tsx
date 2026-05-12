@@ -10,8 +10,11 @@ import SalesEntryPage from './pages/SalesEntryPage'
 import ReportsPage from './pages/ReportsPage'
 import StockPage   from './pages/StockPage'
 import LiveMapPage from './pages/LiveMapPage'
+import PendingOutletsPage from './pages/PendingOutletsPage'
 
-type Page = 'routes' | 'products' | 'sales' | 'reports'
+
+type Page = 'routes' | 'products' | 'sales' | 'reports' | 'stock' | 'livemap' | 'pending'
+
 
 export default function App() {
   const { isAuthenticated, setAuthenticated, setSettings, setTerritories,
@@ -59,6 +62,8 @@ export default function App() {
         {activePage === 'reports'  && <ReportsPage />}
         {activePage === 'stock'   && <StockPage />}
 	{activePage === 'livemap' && <LiveMapPage />}
+	{activePage === 'pending' && <PendingOutletsPage />}
+
       </div>
     </div>
   )

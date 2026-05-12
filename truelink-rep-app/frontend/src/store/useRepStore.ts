@@ -2,50 +2,48 @@ import { create } from 'zustand'
 import { SalesRep, DayStop, StockLoad, Product, NonSaleReason, OutletVisit, SalesRecord } from '../types'
 
 interface RepStore {
-  // Auth
   isAuthenticated: boolean
   setAuthenticated: (v: boolean) => void
 
-  // Selected rep (shared login)
   activeRep: SalesRep | null
   setActiveRep: (r: SalesRep | null) => void
   allReps: SalesRep[]
   setAllReps: (r: SalesRep[]) => void
 
-  // Today's route
   todayStops: DayStop[]
   setTodayStops: (s: DayStop[]) => void
   routePlanId: string | null
   dayNumber: number | null
   setRouteInfo: (planId: string, day: number) => void
 
-  // Stock
   stockLoads: StockLoad[]
   setStockLoads: (s: StockLoad[]) => void
 
-  // Products
   products: Product[]
   setProducts: (p: Product[]) => void
 
-  // Non-sale reasons
   reasons: NonSaleReason[]
   setReasons: (r: NonSaleReason[]) => void
 
-  // Live location
   liveLocation: { lat: number; lon: number; accuracy: number } | null
   setLiveLocation: (l: { lat: number; lon: number; accuracy: number } | null) => void
 
-  // Active outlet (for selling/no-sale flow)
   activeOutletId: string | null
   setActiveOutletId: (id: string | null) => void
 
-  // Navigation
   page: 'home' | 'map' | 'list' | 'sell' | 'nosale' | 'stock'
   setPage: (p: RepStore['page']) => void
 
-  // Update a stop's visit after action
+  darkMode: boolean
+  setDarkMode: (v: boolean) => void
+
   updateStopVisit: (outletId: string, visit: OutletVisit, sales?: SalesRecord[]) => void
 }
+
+// Load dark mode preference from localStorage
+const savedDarkMode = typeof window !== 'undefined'
+  ? localStorage.getItem('darkMode') !== 'false'
+  : true
 
 export const useRepStore = create<RepStore>((set) => ({
   isAuthenticated: false,
@@ -79,6 +77,12 @@ export const useRepStore = create<RepStore>((set) => ({
 
   page: 'home',
   setPage: (p) => set({ page: p }),
+
+  darkMode: savedDarkMode,
+  setDarkMode: (v) => {
+    localStorage.setItem('darkMode', String(v))
+    set({ darkMode: v })
+  },
 
   updateStopVisit: (outletId, visit, sales) =>
     set((s) => ({
