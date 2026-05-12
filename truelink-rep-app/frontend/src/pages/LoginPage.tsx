@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useRepStore } from '../store/useRepStore'
 
@@ -16,16 +16,15 @@ export default function LoginPage() {
   const [pin,         setPin]         = useState(['', '', '', ''])
   const [pinError,    setPinError]    = useState('')
   const [authError,   setAuthError]   = useState('')
-  const inputRefs     = useRef<(HTMLInputElement | null)[]>([])
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
   // Auto-login with shared credentials on mount
-  useState(() => {
+  useEffect(() => {
     autoLogin()
-  })
+  }, [])
 
   const autoLogin = async () => {
     try {
-      // Try existing session first
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
         setAuthenticated(true)
@@ -33,7 +32,6 @@ export default function LoginPage() {
         setStep('pick')
         return
       }
-      // Sign in with shared credentials
       const { error } = await supabase.auth.signInWithPassword({
         email: SHARED_EMAIL, password: SHARED_PASSWORD,
       })
@@ -70,7 +68,6 @@ export default function LoginPage() {
     if (value && index < 3) {
       inputRefs.current[index + 1]?.focus()
     }
-    // Auto-submit when 4 digits entered
     if (value && index === 3) {
       const enteredPin = [...newPin.slice(0, 3), value].join('')
       verifyPin(enteredPin)
@@ -87,7 +84,6 @@ export default function LoginPage() {
     if (!selectedRep) return
     const rep = selectedRep as typeof allReps[0] & { pin_code?: string }
     if (!rep.pin_code) {
-      // No PIN set — allow entry with warning
       setActiveRep(selectedRep)
       return
     }
@@ -189,7 +185,6 @@ export default function LoginPage() {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-xs text-center">
-          {/* Rep avatar */}
           <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
             <span className="text-white text-2xl font-bold">{initials}</span>
           </div>
@@ -200,7 +195,7 @@ export default function LoginPage() {
 
           {rep.pin_code ? (
             <>
-              {/* PIN dots */}
+              {/* PIN input boxes */}
               <div className="flex justify-center gap-4 mb-8">
                 {pin.map((digit, i) => (
                   <div key={i} className="relative">
@@ -212,20 +207,17 @@ export default function LoginPage() {
                       value={digit}
                       onChange={(e) => handlePinDigit(i, e.target.value)}
                       onKeyDown={(e) => handlePinKeyDown(i, e)}
-                      className="w-14 h-14 bg-slate-800 border-2 border-slate-700 rounded-2xl text-white text-2xl font-bold text-center focus:outline-none focus:border-blue-500 transition-colors"
-                      style={{ caretColor: 'transparent' }}
+                      className="w-14 h-14 bg-slate-800 border-2 border-slate-700 rounded-2xl text-white text-2xl font-bold text-center focus:outline-none focus:border-blue-500 transition-colors opacity-0 absolute inset-0"
                     />
-                    {digit && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-3 h-3 bg-white rounded-full" />
-                      </div>
-                    )}
+                    <div className={`w-14 h-14 bg-slate-800 border-2 rounded-2xl flex items-center justify-center transition-colors ${digit ? 'border-blue-500' : 'border-slate-700'}`}>
+                      {digit ? <div className="w-3 h-3 bg-white rounded-full" /> : null}
+                    </div>
                   </div>
                 ))}
               </div>
 
               {pinError && (
-                <p className="text-red-400 text-sm mb-4 animate-pulse">{pinError}</p>
+                <p className="text-red-400 text-sm mb-4">{pinError}</p>
               )}
 
               {/* Numpad */}
@@ -235,11 +227,12 @@ export default function LoginPage() {
                     key={i}
                     onClick={() => {
                       if (key === '⌫') {
-                        const lastFilled = [...pin].reverse().findIndex((d) => d !== '')
-                        if (lastFilled >= 0) {
-                          const idx = 3 - lastFilled
-                          handlePinDigit(idx, '')
-                          inputRefs.current[idx]?.focus()
+                        const lastIdx = [...pin].map((d, i) => d ? i : -1).filter(i => i >= 0).pop()
+                        if (lastIdx !== undefined) {
+                          const newPin = [...pin]
+                          newPin[lastIdx] = ''
+                          setPin(newPin)
+                          inputRefs.current[lastIdx]?.focus()
                         }
                       } else if (key !== '') {
                         const firstEmpty = pin.findIndex((d) => d === '')
