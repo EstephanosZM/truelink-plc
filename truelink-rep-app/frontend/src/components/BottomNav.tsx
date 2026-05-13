@@ -1,25 +1,32 @@
 import { useRepStore } from '../store/useRepStore'
 
 export default function BottomNav() {
-  const { page, setPage, todayStops } = useRepStore()
+  const { page, setPage, todayStops, darkMode } = useRepStore()
 
-  const pending = todayStops.filter((s) => !s.visit || s.visit.visit_status === 'not_visited').length
+  const pending = todayStops.filter(
+    (s) => !s.visit || s.visit.visit_status === 'not_visited'
+  ).length
 
   const tabs = [
-    { key: 'home',  icon: '🏠', label: 'Home'  },
-    { key: 'map',   icon: '🗺',  label: 'Map'   },
-    { key: 'list',  icon: '📋', label: 'Stops', badge: pending > 0 ? pending : null },
-    { key: 'stock', icon: '📦', label: 'Stock'  },
+    { key: 'home',    icon: '🏠', label: 'Home'    },
+    { key: 'map',     icon: '🗺',  label: 'Map'     },
+    { key: 'list',    icon: '📋', label: 'Stops',  badge: pending > 0 ? pending : null },
+    { key: 'stock',   icon: '📦', label: 'Stock'   },
+    { key: 'reports', icon: '📊', label: 'Reports' },
   ] as const
 
+  const bg     = darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+  const active = 'text-blue-500'
+  const inact  = darkMode ? 'text-slate-500' : 'text-slate-400'
+
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex items-center safe-area-pb z-10">
+    <div className={`absolute bottom-0 left-0 right-0 ${bg} border-t flex items-center safe-area-pb z-10`}>
       {tabs.map((tab) => (
         <button
           key={tab.key}
-          onClick={() => setPage(tab.key)}
+          onClick={() => setPage(tab.key as typeof page)}
           className={`flex-1 flex flex-col items-center py-3 relative transition-colors ${
-            page === tab.key ? 'text-blue-500' : 'text-slate-500'
+            page === tab.key ? active : inact
           }`}
         >
           <span className="text-xl">{tab.icon}</span>

@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react'
 import { supabase } from './lib/supabase'
 import { useRepStore } from './store/useRepStore'
 import { today } from './lib/utils'
-import LoginPage from './pages/LoginPage'
-import HomePage  from './pages/HomePage'
-import MapPage   from './pages/MapPage'
-import ListPage  from './pages/ListPage'
-import StockPage from './pages/StockPage'
-import BottomNav from './components/BottomNav'
+import LoginPage   from './pages/LoginPage'
+import HomePage    from './pages/HomePage'
+import MapPage     from './pages/MapPage'
+import ListPage    from './pages/ListPage'
+import StockPage   from './pages/StockPage'
+import ReportPage  from './pages/ReportPage'
+import BottomNav   from './components/BottomNav'
 import { DayStop } from './types'
 
 export default function App() {
@@ -50,34 +51,26 @@ export default function App() {
     if (!activeRep) return
     const todayStr = today()
 
-    // Load products
     const { data: prods } = await supabase.from('products').select('*').eq('status', 'active')
     if (prods) setProducts(prods)
 
-    // Load non-sale reasons
     const { data: rsns } = await supabase
       .from('non_sale_reasons').select('*').eq('is_active', true).order('reason')
     if (rsns) setReasons(rsns)
 
-    // Load stock for today
     const { data: stock } = await supabase.from('stock_loads')
       .select('*').eq('sales_rep_id', activeRep.id).eq('load_date', todayStr)
     if (stock) setStockLoads(stock)
 
-    // ── Load proximity radius from admin settings ──────────
-    // Use the rep's territory if set, otherwise fallback to 100m
+    // Load proximity radius from admin settings
     if (activeRep.territory_id) {
       const { data: ps } = await supabase
-        .from('proximity_settings')
-        .select('radius_meters')
-        .eq('territory_id', activeRep.territory_id)
-        .single()
-      if (ps?.radius_meters) {
-        setProximityRadius(ps.radius_meters)
-      }
+        .from('proximity_settings').select('radius_meters')
+        .eq('territory_id', activeRep.territory_id).single()
+      if (ps?.radius_meters) setProximityRadius(ps.radius_meters)
     }
 
-    // ── Find today's route ─────────────────────────────────
+    // Find today's route
     const { data: stops } = await supabase
       .from('route_stops')
       .select(`*, route_plans!inner(id, territory_id, generated_at, n_days, status)`)
@@ -86,12 +79,8 @@ export default function App() {
       .eq('route_plans.status', 'saved')
       .order('sequence')
 
-    if (!stops || stops.length === 0) {
-      console.log('No route assigned for today:', todayStr)
-      return
-    }
+    if (!stops || stops.length === 0) return
 
-    // Use the most recently generated plan
     const sorted = stops.sort((
       a: { route_plans: { generated_at: string } },
       b: { route_plans: { generated_at: string } }
@@ -103,20 +92,15 @@ export default function App() {
 
     const outletIds = sorted.map((s: { outlet_id: string }) => s.outlet_id)
     const { data: outlets } = await supabase.from('outlets').select('*').in('id', outletIds)
-
-    const { data: visits } = await supabase.from('outlet_visits')
+    const { data: visits }  = await supabase.from('outlet_visits')
       .select('*').eq('route_plan_id', planId).eq('day_number', dayNum).eq('sales_rep_id', activeRep.id)
-
-    const { data: sales } = await supabase.from('sales_records')
+    const { data: sales }   = await supabase.from('sales_records')
       .select('*').eq('route_plan_id', planId).eq('day_number', dayNum).eq('sales_rep_id', activeRep.id)
 
     const dayStops: DayStop[] = sorted
       .filter((s: { route_plan_id: string; day_number: number }) =>
         s.route_plan_id === planId && s.day_number === dayNum)
-      .map((s: {
-        id: string; route_plan_id: string; day_number: number
-        outlet_id: string; sequence: number; sales_rep_id: string | null
-      }) => ({
+      .map((s: { id: string; route_plan_id: string; day_number: number; outlet_id: string; sequence: number; sales_rep_id: string | null }) => ({
         ...s,
         outlet: (outlets || []).find((o: { id: string }) => o.id === s.outlet_id)!,
         visit:  (visits  || []).find((v: { outlet_id: string }) => v.outlet_id === s.outlet_id),
@@ -139,8 +123,7 @@ export default function App() {
           setLiveLocation({ lat, lon, accuracy: acc })
           if (activeRep) {
             await supabase.from('rep_locations').insert({
-              sales_rep_id: activeRep.id,
-              latitude: lat, longitude: lon, accuracy_m: acc,
+              sales_rep_id: activeRep.id, latitude: lat, longitude: lon, accuracy_m: acc,
             })
           }
         },
@@ -163,10 +146,11 @@ export default function App() {
   return (
     <div className={`h-screen flex flex-col relative overflow-hidden ${bg}`}>
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        {page === 'home'  && <HomePage />}
-        {page === 'map'   && <MapPage />}
-        {page === 'list'  && <ListPage />}
-        {page === 'stock' && <StockPage />}
+        {page === 'home'    && <HomePage />}
+        {page === 'map'     && <MapPage />}
+        {page === 'list'    && <ListPage />}
+        {page === 'stock'   && <StockPage />}
+        {page === 'reports' && <ReportPage />}
       </div>
       <BottomNav />
     </div>
