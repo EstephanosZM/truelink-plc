@@ -2,12 +2,12 @@ import { useEffect, useRef } from 'react'
 import { supabase } from './lib/supabase'
 import { useRepStore } from './store/useRepStore'
 import { today } from './lib/utils'
-import LoginPage  from './pages/LoginPage'
-import HomePage   from './pages/HomePage'
-import MapPage    from './pages/MapPage'
-import ListPage   from './pages/ListPage'
-import StockPage  from './pages/StockPage'
-import BottomNav  from './components/BottomNav'
+import LoginPage from './pages/LoginPage'
+import HomePage  from './pages/HomePage'
+import MapPage   from './pages/MapPage'
+import ListPage  from './pages/ListPage'
+import StockPage from './pages/StockPage'
+import BottomNav from './components/BottomNav'
 import { DayStop } from './types'
 
 export default function App() {
@@ -17,6 +17,7 @@ export default function App() {
     setTodayStops, setRouteInfo,
     setStockLoads, setProducts,
     setReasons, setLiveLocation,
+    setProximityRadius,
     page, darkMode,
   } = useRepStore()
 
@@ -63,14 +64,23 @@ export default function App() {
       .select('*').eq('sales_rep_id', activeRep.id).eq('load_date', todayStr)
     if (stock) setStockLoads(stock)
 
-    // ── Find today's route for this rep ──────────────────────
-    // Match on route_date = today AND sales_rep_id = this rep
+    // ── Load proximity radius from admin settings ──────────
+    // Use the rep's territory if set, otherwise fallback to 100m
+    if (activeRep.territory_id) {
+      const { data: ps } = await supabase
+        .from('proximity_settings')
+        .select('radius_meters')
+        .eq('territory_id', activeRep.territory_id)
+        .single()
+      if (ps?.radius_meters) {
+        setProximityRadius(ps.radius_meters)
+      }
+    }
+
+    // ── Find today's route ─────────────────────────────────
     const { data: stops } = await supabase
       .from('route_stops')
-      .select(`
-        *,
-        route_plans!inner(id, territory_id, generated_at, n_days, status)
-      `)
+      .select(`*, route_plans!inner(id, territory_id, generated_at, n_days, status)`)
       .eq('sales_rep_id', activeRep.id)
       .eq('route_date', todayStr)
       .eq('route_plans.status', 'saved')
@@ -81,36 +91,26 @@ export default function App() {
       return
     }
 
-    // Use the most recently generated plan if multiple exist for today
-    const sortedStops = stops.sort((
+    // Use the most recently generated plan
+    const sorted = stops.sort((
       a: { route_plans: { generated_at: string } },
       b: { route_plans: { generated_at: string } }
     ) => new Date(b.route_plans.generated_at).getTime() - new Date(a.route_plans.generated_at).getTime())
 
-    const planId  = sortedStops[0].route_plan_id
-    const dayNum  = sortedStops[0].day_number
+    const planId = sorted[0].route_plan_id
+    const dayNum = sorted[0].day_number
     setRouteInfo(planId, dayNum)
 
-    // Load outlets for these stops
-    const outletIds = sortedStops.map((s: { outlet_id: string }) => s.outlet_id)
+    const outletIds = sorted.map((s: { outlet_id: string }) => s.outlet_id)
     const { data: outlets } = await supabase.from('outlets').select('*').in('id', outletIds)
 
-    // Load existing visits for today
     const { data: visits } = await supabase.from('outlet_visits')
-      .select('*')
-      .eq('route_plan_id', planId)
-      .eq('day_number', dayNum)
-      .eq('sales_rep_id', activeRep.id)
+      .select('*').eq('route_plan_id', planId).eq('day_number', dayNum).eq('sales_rep_id', activeRep.id)
 
-    // Load existing sales
     const { data: sales } = await supabase.from('sales_records')
-      .select('*')
-      .eq('route_plan_id', planId)
-      .eq('day_number', dayNum)
-      .eq('sales_rep_id', activeRep.id)
+      .select('*').eq('route_plan_id', planId).eq('day_number', dayNum).eq('sales_rep_id', activeRep.id)
 
-    // Assemble DayStops
-    const dayStops: DayStop[] = sortedStops
+    const dayStops: DayStop[] = sorted
       .filter((s: { route_plan_id: string; day_number: number }) =>
         s.route_plan_id === planId && s.day_number === dayNum)
       .map((s: {
@@ -139,8 +139,8 @@ export default function App() {
           setLiveLocation({ lat, lon, accuracy: acc })
           if (activeRep) {
             await supabase.from('rep_locations').insert({
-              sales_rep_id: activeRep.id, latitude: lat,
-              longitude: lon, accuracy_m: acc,
+              sales_rep_id: activeRep.id,
+              latitude: lat, longitude: lon, accuracy_m: acc,
             })
           }
         },
@@ -158,7 +158,6 @@ export default function App() {
 
   if (!isAuthenticated || !activeRep) return <LoginPage />
 
-  // Apply dark mode to root
   const bg = darkMode ? 'bg-slate-900' : 'bg-slate-50'
 
   return (

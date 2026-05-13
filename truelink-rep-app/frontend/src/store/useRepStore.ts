@@ -37,10 +37,17 @@ interface RepStore {
   darkMode: boolean
   setDarkMode: (v: boolean) => void
 
+  // Read-only from admin — set during bootstrap
+  proximityRadius: number
+  setProximityRadius: (r: number) => void
+
+  // Last visited outlet for map animation start point
+  lastVisitedPosition: { lat: number; lon: number } | null
+  setLastVisitedPosition: (p: { lat: number; lon: number } | null) => void
+
   updateStopVisit: (outletId: string, visit: OutletVisit, sales?: SalesRecord[]) => void
 }
 
-// Load dark mode preference from localStorage
 const savedDarkMode = typeof window !== 'undefined'
   ? localStorage.getItem('darkMode') !== 'false'
   : true
@@ -84,6 +91,13 @@ export const useRepStore = create<RepStore>((set) => ({
     set({ darkMode: v })
   },
 
+  // Default 100m — overwritten from Supabase during bootstrap
+  proximityRadius: 100,
+  setProximityRadius: (r) => set({ proximityRadius: r }),
+
+  lastVisitedPosition: null,
+  setLastVisitedPosition: (p) => set({ lastVisitedPosition: p }),
+
   updateStopVisit: (outletId, visit, sales) =>
     set((s) => ({
       todayStops: s.todayStops.map((stop) =>
@@ -91,5 +105,11 @@ export const useRepStore = create<RepStore>((set) => ({
           ? { ...stop, visit, sales: sales || stop.sales }
           : stop
       ),
+      lastVisitedPosition: s.todayStops.find((stop) => stop.outlet_id === outletId)
+        ? {
+            lat: s.todayStops.find((stop) => stop.outlet_id === outletId)!.outlet.latitude,
+            lon: s.todayStops.find((stop) => stop.outlet_id === outletId)!.outlet.longitude,
+          }
+        : s.lastVisitedPosition,
     })),
 }))
