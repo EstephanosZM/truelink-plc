@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useStore } from '../store/useStore'
 import { api } from '../lib/api'
@@ -27,10 +27,6 @@ function getDateOptions(): { value: string; label: string }[] {
 
 interface DayAssignment { salesRepId: string; routeDate: string }
 
-interface Stop {
-  id: string; sequence: number; name: string; lat: number; lon: number
-}
-
 export default function Sidebar() {
   const {
     activeTerritoryId, outlets, dayRoutes, routePlan,
@@ -51,12 +47,6 @@ export default function Sidebar() {
   const [assignments, setAssignments] = useState<Record<number, DayAssignment>>({})
   const [editingDay,  setEditingDay]  = useState<number | null>(null)
 
-  // Drag-to-reorder state
-  const [dragIdx,    setDragIdx]    = useState<number | null>(null)
-  const [dragDay,    setDragDay]    = useState<number | null>(null)
-  const [dragOver,   setDragOver]   = useState<number | null>(null)
-  const dragNodeRef = useRef<HTMLButtonElement | null>(null)
-
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [routeName,     setRouteName]     = useState('')
   const [showHistory,   setShowHistory]   = useState(false)
@@ -71,70 +61,17 @@ export default function Sidebar() {
   const today        = dateOptions[0].value
   const mb           = METHOD_BADGE[routingMethod] || METHOD_BADGE.nearest_neighbour
 
-  const syncAssignments = (routes: typeof dayRoutes) => {
+  useEffect(() => {
     const defaults: Record<number, DayAssignment> = {}
-    routes.forEach((dr) => {
-      defaults[dr.day] = assignments[dr.day] || { salesRepId: dr.salesRepId || '', routeDate: today }
+    dayRoutes.forEach((dr) => {
+      defaults[dr.day] = { salesRepId: dr.salesRepId || '', routeDate: today }
     })
     setAssignments(defaults)
-  }
+  }, [dayRoutes.length])
 
   const setAssignment = (day: number, field: keyof DayAssignment, value: string) =>
     setAssignments((prev) => ({ ...prev, [day]: { ...prev[day], [field]: value } }))
 
-  // ── Drag handlers for reordering within a day ─────────────────────────────
-  const handleDragStart = (e: React.DragEvent, day: number, idx: number) => {
-    setDragIdx(idx); setDragDay(day)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    setDragOver(idx)
-  }
-
-  const handleDrop = (e: React.DragEvent, day: number, dropIdx: number) => {
-    e.preventDefault()
-    if (dragIdx === null || dragDay !== day || dragIdx === dropIdx) {
-      setDragIdx(null); setDragDay(null); setDragOver(null); return
-    }
-
-    const dr        = dayRoutes.find((d) => d.day === day)
-    if (!dr) return
-    const newStops  = [...dr.stops]
-    const [moved]   = newStops.splice(dragIdx, 1)
-    newStops.splice(dropIdx, 0, moved)
-
-    // Re-number sequences
-    const resequenced = newStops.map((s, i) => ({ ...s, sequence: i + 1 }))
-
-    // Update store
-    const updated = dayRoutes.map((d) =>
-      d.day === day ? { ...d, stops: resequenced } : d
-    )
-    setDayRoutes(updated)
-
-    setDragIdx(null); setDragDay(null); setDragOver(null)
-  }
-
-  const handleDragEnd = () => {
-    setDragIdx(null); setDragDay(null); setDragOver(null)
-  }
-
-  // Move stop up or down within a day (for touch / non-drag fallback)
-  const moveStopInDay = (day: number, idx: number, direction: 'up' | 'down') => {
-    const dr = dayRoutes.find((d) => d.day === day)
-    if (!dr) return
-    const newStops = [...dr.stops]
-    const targetIdx = direction === 'up' ? idx - 1 : idx + 1
-    if (targetIdx < 0 || targetIdx >= newStops.length) return
-    ;[newStops[idx], newStops[targetIdx]] = [newStops[targetIdx], newStops[idx]]
-    const resequenced = newStops.map((s, i) => ({ ...s, sequence: i + 1 }))
-    setDayRoutes(dayRoutes.map((d) => d.day === day ? { ...d, stops: resequenced } : d))
-  }
-
-  // ── Route creation ────────────────────────────────────────
   const handleCreateRoute = async () => {
     if (!activeTerritoryId || !settings) return
     if (settings.warehouse_lat === 0 && settings.warehouse_lon === 0)
@@ -144,13 +81,12 @@ export default function Sidebar() {
     setError(''); setLoading('optimize', true)
     try {
       const result = await api.optimize({
-        outlets:   outlets.map((o) => ({ id: o.id, lat: o.latitude, lon: o.longitude, name: o.outlet_name })),
-        warehouse: { lat: settings.warehouse_lat, lon: settings.warehouse_lon },
-        n_days: nDays, min_outlets: minOut, max_outlets: max, method: routingMethod,
+        outlets:     outlets.map((o) => ({ id: o.id, lat: o.latitude, lon: o.longitude, name: o.outlet_name })),
+        warehouse:   { lat: settings.warehouse_lat, lon: settings.warehouse_lon },
+        n_days: nDays, min_outlets: minOut, max_outlets: max,
+        method: routingMethod,
       })
-      const newRoutes = result.days.map((d) => ({ ...d, salesRepId: null }))
-      setDayRoutes(newRoutes)
-      syncAssignments(newRoutes)
+      setDayRoutes(result.days.map((d) => ({ ...d, salesRepId: null })))
       setMode('route')
       const { data: plan } = await supabase.from('route_plans').insert({
         territory_id: activeTerritoryId, n_days: nDays,
@@ -163,13 +99,11 @@ export default function Sidebar() {
     setLoading('optimize', false)
   }
 
-  // ── Save ──────────────────────────────────────────────────
   const handleSaveClick = () => {
     if (!routePlan || !dayRoutes.length) return
     const missing = dayRoutes.find((dr) => !assignments[dr.day]?.routeDate)
-    if (missing) return setError(`Set a work date for Day ${missing.day}`)
-    setRouteName(routePlan.route_name ||
-      `Route ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
+    if (missing) return setError(`Please set a work date for Day ${missing.day}`)
+    setRouteName(routePlan.route_name || `Route ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`)
     setShowSaveModal(true)
   }
 
@@ -186,8 +120,8 @@ export default function Sidebar() {
         route_date:   assign.routeDate  || today,
       }))
     })
-    const { error: ie } = await supabase.from('route_stops').insert(stops)
-    if (ie) { setError(`Save failed: ${ie.message}`); setSaving(false); return }
+    const { error: insertError } = await supabase.from('route_stops').insert(stops)
+    if (insertError) { setError(`Save failed: ${insertError.message}`); setSaving(false); return }
     await supabase.from('route_plans')
       .update({ status: 'saved', route_name: routeName.trim() || null, route_method: routingMethod })
       .eq('id', routePlan.id)
@@ -238,7 +172,7 @@ export default function Sidebar() {
       const result = await api.reoptimize({
         days: [
           { day: fromDR.day, outlets: toOut(fromStops) },
-          { day: toDay,      outlets: toOut(toStops) },
+          { day: toDay,      outlets: toOut(toStops)  },
         ],
         warehouse: { lat: settings.warehouse_lat, lon: settings.warehouse_lon },
         method: routingMethod,
@@ -249,7 +183,6 @@ export default function Sidebar() {
     setMovingTo(null)
   }
 
-  // ── History ───────────────────────────────────────────────
   const openHistory = async () => {
     if (!activeTerritoryId) return
     setLoadingHist(true); setShowHistory(true)
@@ -268,8 +201,9 @@ export default function Sidebar() {
       .from('route_stops').select('*, outlets(id, outlet_name, latitude, longitude)')
       .eq('route_plan_id', planId).order('sequence')
     if (error) console.error(error)
-    if (!stops?.length) {
-      setError('No stops found. Regenerate and save.'); setLoading('history', false); return
+    if (!stops || !stops.length) {
+      setError('No stops found. Regenerate and save this route.')
+      setLoading('history', false); return
     }
     const { data: plan } = await supabase.from('route_plans').select('*').eq('id', planId).single()
     if (plan) setRoutePlan(plan)
@@ -287,7 +221,7 @@ export default function Sidebar() {
     })
     setAssignments(saved)
 
-    const newRoutes = Object.entries(dayMap).map(([day, ds]) => ({
+    setDayRoutes(Object.entries(dayMap).map(([day, ds]) => ({
       day: parseInt(day),
       salesRepId: (ds[0] as { sales_rep_id: string | null }).sales_rep_id || null,
       stops: ds.map((s: {
@@ -299,9 +233,8 @@ export default function Sidebar() {
         lat:  s.outlets?.latitude    || 0,
         lon:  s.outlets?.longitude   || 0,
       })),
-    })).sort((a, b) => a.day - b.day)
+    })).sort((a, b) => a.day - b.day))
 
-    setDayRoutes(newRoutes)
     setMode('route'); setLoading('history', false)
   }
 
@@ -315,9 +248,9 @@ export default function Sidebar() {
     new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
     ' · ' + new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
 
-  const getRepName = (id: string) => salesReps.find((r) => r.id === id)?.name || '—'
-  const selOut     = outlets.find((o) => o.id === selectedOutletId)
-  const selDay     = dayRoutes.find((dr) => dr.stops.some((s) => s.id === selectedOutletId))
+  const getRepName      = (id: string) => salesReps.find((r) => r.id === id)?.name || '—'
+  const selectedOut     = outlets.find((o) => o.id === selectedOutletId)
+  const selectedDayRoute = dayRoutes.find((dr) => dr.stops.some((s) => s.id === selectedOutletId))
 
   const filteredRoutes = searchQuery
     ? dayRoutes.map((dr) => ({
@@ -327,8 +260,8 @@ export default function Sidebar() {
 
   const totalOutlets = dayRoutes.reduce((a, d) => a + d.stops.length, 0)
   const avgPerDay    = dayRoutes.length ? Math.round(totalOutlets / dayRoutes.length) : 0
-  const maxDayR      = dayRoutes.reduce((a, d) => d.stops.length > a.stops.length ? d : a, dayRoutes[0] || { day:0, stops:[], salesRepId: null })
-  const minDayR      = dayRoutes.reduce((a, d) => d.stops.length < a.stops.length ? d : a, dayRoutes[0] || { day:0, stops:[], salesRepId: null })
+  const maxDayR      = dayRoutes.reduce((a, d) => d.stops.length > a.stops.length ? d : a, dayRoutes[0] || { day: 0, stops: [], salesRepId: null })
+  const minDayR      = dayRoutes.reduce((a, d) => d.stops.length < a.stops.length ? d : a, dayRoutes[0] || { day: 0, stops: [], salesRepId: null })
 
   return (
     <>
@@ -358,11 +291,11 @@ export default function Sidebar() {
       )}
 
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col h-full shrink-0 overflow-hidden">
-        {/* Controls */}
         <div className="p-4 border-b border-slate-200 space-y-3">
           <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="🔍 Search outlets…"
             className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-slate-500 mb-1 block">Days</label>
@@ -375,6 +308,7 @@ export default function Sidebar() {
                 className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
+
           <div>
             <label className="text-xs text-slate-500 mb-1 block">Max outlets/day</label>
             <input type="number" min={1} value={maxOut} placeholder="No limit"
@@ -382,17 +316,18 @@ export default function Sidebar() {
               className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {/* Method badge */}
+          {/* Current method indicator — read-only, set in Settings */}
           <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
-            routingMethod === 'two_opt'  ? 'border-green-200 bg-green-50'   :
-            routingMethod === 'ortools'  ? 'border-purple-200 bg-purple-50' : 'border-blue-200 bg-blue-50'
+            routingMethod === 'two_opt'  ? 'border-green-200 bg-green-50'  :
+            routingMethod === 'ortools'  ? 'border-purple-200 bg-purple-50' :
+            'border-blue-200 bg-blue-50'
           }`}>
             <p className={`text-xs font-medium ${
               routingMethod === 'two_opt'  ? 'text-green-700'  :
               routingMethod === 'ortools'  ? 'text-purple-700' : 'text-blue-700'
             }`}>
-              {routingMethod === 'nearest_neighbour' ? 'Nearest Neighbour' :
-               routingMethod === 'two_opt'           ? '2-Opt' : 'OR-Tools'}
+              Method: {routingMethod === 'nearest_neighbour' ? 'Nearest Neighbour' :
+                       routingMethod === 'two_opt'           ? '2-Opt'            : 'OR-Tools'}
             </p>
             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${mb.color}`}>{mb.label}</span>
           </div>
@@ -403,7 +338,8 @@ export default function Sidebar() {
             disabled={!activeTerritoryId || !outlets.length || isOptimizing}
             className={`w-full py-2 text-white rounded-lg text-sm font-medium disabled:opacity-40 transition-colors ${
               routingMethod === 'two_opt'  ? 'bg-green-600 hover:bg-green-700'   :
-              routingMethod === 'ortools'  ? 'bg-purple-600 hover:bg-purple-700' : 'bg-blue-600 hover:bg-blue-700'
+              routingMethod === 'ortools'  ? 'bg-purple-600 hover:bg-purple-700' :
+              'bg-blue-600 hover:bg-blue-700'
             }`}>
             {isOptimizing
               ? `⏳ ${routingMethod === 'ortools' ? 'Solving (up to 30s)…' : 'Optimizing…'}`
@@ -418,7 +354,9 @@ export default function Sidebar() {
                   {saving ? '…' : '💾 Save'}
                 </button>
                 <button onClick={handleDraw}
-                  className="py-2 border border-slate-300 rounded-lg text-xs hover:bg-slate-50 text-slate-700">✏ Draw</button>
+                  className="py-2 border border-slate-300 rounded-lg text-xs hover:bg-slate-50 text-slate-700">
+                  ✏ Draw
+                </button>
               </>
             )}
             <button onClick={openHistory} disabled={!activeTerritoryId}
@@ -436,10 +374,12 @@ export default function Sidebar() {
               <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
             </div>
             {loadingHist && <p className="text-xs text-slate-400 px-4 pb-3">Loading…</p>}
-            {!loadingHist && !history.length && <p className="text-xs text-slate-400 px-4 pb-3">No saved routes</p>}
+            {!loadingHist && history.length === 0 && (
+              <p className="text-xs text-slate-400 px-4 pb-3">No saved routes for this territory</p>
+            )}
             <div className="max-h-64 overflow-y-auto">
               {history.map((h) => {
-                const hm  = (h.route_method || 'nearest_neighbour')
+                const hm = (h.route_method || 'nearest_neighbour') as string
                 const hmb = METHOD_BADGE[hm] || METHOD_BADGE.nearest_neighbour
                 return (
                   <div key={h.id} className="px-4 py-3 border-t border-slate-200 hover:bg-white">
@@ -487,18 +427,18 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Move outlet to another day */}
-          {selectedOutletId && selOut && (
+          {/* Move outlet */}
+          {selectedOutletId && selectedOut && (
             <div className="p-4 border-b border-slate-200 bg-blue-50">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Move to Another Day</span>
+                <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Move Outlet</span>
                 <button onClick={() => setSelectedOutletId(null)} className="text-blue-400 hover:text-blue-600 text-lg">×</button>
               </div>
-              <p className="text-sm font-medium text-slate-900 truncate">{selOut.outlet_name}</p>
-              {selOut.land_mark && <p className="text-xs text-slate-500 mb-2">{selOut.land_mark}</p>}
-              <p className="text-xs text-slate-600 mb-2">Currently: <span className="font-medium">Day {selDay?.day}</span></p>
+              <p className="text-sm font-medium text-slate-900 truncate">{selectedOut.outlet_name}</p>
+              {selectedOut.land_mark && <p className="text-xs text-slate-500 mb-2">{selectedOut.land_mark}</p>}
+              <p className="text-xs text-slate-600 mb-2">Currently: <span className="font-medium">Day {selectedDayRoute?.day}</span></p>
               <div className="grid grid-cols-4 gap-1">
-                {dayRoutes.map((dr) => dr.day !== selDay?.day && (
+                {dayRoutes.map((dr) => dr.day !== selectedDayRoute?.day && (
                   <button key={dr.day} onClick={() => handleMoveOutlet(dr.day)} disabled={movingTo !== null}
                     className="py-1.5 rounded-md text-xs font-medium text-white disabled:opacity-50"
                     style={{ backgroundColor: getDayColor(dr.day) }}>
@@ -514,12 +454,10 @@ export default function Sidebar() {
             const assign  = assignments[dr.day] || { salesRepId: '', routeDate: today }
             const isEdit  = editingDay === dr.day
             const isSaved = routePlan?.status === 'saved' && !isEdit
-            const isActive = activeDay === dr.day
-
             return (
               <div key={dr.day}>
-                <button onClick={() => setActiveDay(isActive ? null : dr.day)}
-                  className={`w-full flex items-center justify-between px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors ${isActive ? 'bg-slate-50' : ''}`}>
+                <button onClick={() => setActiveDay(activeDay === dr.day ? null : dr.day)}
+                  className={`w-full flex items-center justify-between px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition-colors ${activeDay === dr.day ? 'bg-slate-50' : ''}`}>
                   <div className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: getDayColor(dr.day) }} />
                     <span className="text-sm font-medium text-slate-900">Day {dr.day}</span>
@@ -529,13 +467,12 @@ export default function Sidebar() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500">{dr.stops.length}</span>
-                    <span className="text-slate-400 text-xs">{isActive ? '▲' : '▼'}</span>
+                    <span className="text-slate-400 text-xs">{activeDay === dr.day ? '▲' : '▼'}</span>
                   </div>
                 </button>
 
-                {isActive && (
+                {activeDay === dr.day && (
                   <div className="bg-slate-50 border-b border-slate-200">
-                    {/* Assignment */}
                     <div className="px-4 py-3 border-b border-slate-200 space-y-2">
                       <div>
                         <label className="text-xs text-slate-500 mb-1 block">Sales Rep</label>
@@ -587,71 +524,19 @@ export default function Sidebar() {
                         </div>
                       )}
                     </div>
-
-                    {/* Reorder hint */}
-                    <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-100">
-                      <p className="text-xs text-amber-700">
-                        ↕ Drag to reorder · ▲▼ arrows to move
-                      </p>
-                    </div>
-
-                    {/* Stop list with drag-to-reorder */}
-                    {dr.stops.map((stop, idx) => {
-                      const isDragging  = dragDay === dr.day && dragIdx === idx
-                      const isDragOver  = dragDay === dr.day && dragOver === idx
-                      return (
-                        <div
-                          key={stop.id}
-                          className={`relative transition-all ${isDragOver ? 'border-t-2 border-blue-500' : ''}`}
-                        >
-                          <button
-                            ref={dragNodeRef}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, dr.day, idx)}
-                            onDragOver={(e)  => handleDragOver(e, idx)}
-                            onDrop={(e)      => handleDrop(e, dr.day, idx)}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => setSelectedOutletId(stop.id)}
-                            className={`w-full flex items-center gap-2 px-3 py-2.5 hover:bg-white transition-colors text-left ${
-                              selectedOutletId === stop.id ? 'bg-white' : ''
-                            } ${isDragging ? 'opacity-40' : ''}`}
-                          >
-                            {/* Drag handle */}
-                            <span className="text-slate-300 cursor-grab active:cursor-grabbing text-sm shrink-0 select-none">⠿</span>
-
-                            {/* Sequence badge */}
-                            <span className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0"
-                              style={{ backgroundColor: getDayColor(dr.day), fontSize: '10px', fontWeight: 600 }}>
-                              {stop.sequence}
-                            </span>
-
-                            {/* Name */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-slate-900 truncate">{stop.name}</p>
-                              <p className="text-xs text-slate-400 truncate">
-                                {outlets.find((o) => o.id === stop.id)?.land_mark || ''}
-                              </p>
-                            </div>
-
-                            {/* Up/Down arrows */}
-                            <div className="flex flex-col gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => moveStopInDay(dr.day, idx, 'up')}
-                                disabled={idx === 0}
-                                className="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none"
-                                title="Move up"
-                              >▲</button>
-                              <button
-                                onClick={() => moveStopInDay(dr.day, idx, 'down')}
-                                disabled={idx === dr.stops.length - 1}
-                                className="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-slate-700 disabled:opacity-20 text-xs leading-none"
-                                title="Move down"
-                              >▼</button>
-                            </div>
-                          </button>
+                    {dr.stops.map((stop) => (
+                      <button key={stop.id} onClick={() => setSelectedOutletId(stop.id)}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white transition-colors text-left ${selectedOutletId === stop.id ? 'bg-white' : ''}`}>
+                        <span className="w-5 h-5 rounded-full flex items-center justify-center text-white shrink-0"
+                          style={{ backgroundColor: getDayColor(dr.day), fontSize: '10px', fontWeight: 600 }}>
+                          {stop.sequence}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-900 truncate">{stop.name}</p>
+                          <p className="text-xs text-slate-400 truncate">{outlets.find((o) => o.id === stop.id)?.land_mark || ''}</p>
                         </div>
-                      )
-                    })}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>

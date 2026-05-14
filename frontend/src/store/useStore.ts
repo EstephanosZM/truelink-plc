@@ -66,6 +66,9 @@ export const useStore = create<AppState>((set) => ({
   territories: [],
   setTerritories: (t) => set({ territories: t }),
   addTerritory: (t) => set((s) => ({ territories: [...s.territories, t] })),
+  
+  dayNames:    null,
+setDayNames: (n) => set({ dayNames: n }),
 
   proximitySettings: [],
   setProximitySettings: (p) => set({ proximitySettings: p }),
@@ -111,4 +114,6 @@ export const useStore = create<AppState>((set) => ({
 
   loading: {},
   setLoading: (key, v) => set((s) => ({ loading: { ...s.loading, [key]: v } })),
+  dayNames:    Record<number, string> | null
+setDayNames: (n: Record<number, string>) => void
 }))
