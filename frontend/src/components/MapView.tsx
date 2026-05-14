@@ -12,16 +12,12 @@ L.Icon.Default.mergeOptions({
 
 const OSRM = 'https://router.project-osrm.org'
 
-// Fetch road geometry for a full ordered list of waypoints
 async function getRoadPolyline(
   waypoints: { lat: number; lon: number }[]
 ): Promise<L.LatLngTuple[]> {
   if (waypoints.length < 2) return waypoints.map((w) => [w.lat, w.lon] as L.LatLngTuple)
-
-  // Split into chunks of 25 to stay within OSRM limits
   const CHUNK = 25
   const allPts: L.LatLngTuple[] = []
-
   for (let i = 0; i < waypoints.length - 1; i += CHUNK - 1) {
     const chunk  = waypoints.slice(i, Math.min(i + CHUNK, waypoints.length))
     const coords = chunk.map((w) => `${w.lon},${w.lat}`).join(';')
@@ -32,7 +28,7 @@ async function getRoadPolyline(
         const pts = data.routes[0].geometry.coordinates.map(
           ([lon, lat]: [number, number]) => [lat, lon] as L.LatLngTuple
         )
-        if (allPts.length > 0 && pts.length > 0) pts.shift()
+        if (allPts.length > 0) pts.shift()
         allPts.push(...pts)
       } else {
         chunk.forEach((w) => allPts.push([w.lat, w.lon]))
@@ -63,10 +59,12 @@ const warehouseIcon = () => L.divIcon({
 })
 
 export default function MapView() {
-  const mapRef       = useRef<L.Map | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const layersRef    = useRef<L.LayerGroup | null>(null)
-  const roadLayerRef = useRef<L.LayerGroup | null>(null)
+  const mapRef         = useRef<L.Map | null>(null)
+  const containerRef   = useRef<HTMLDivElement>(null)
+  const markerLayerRef = useRef<L.LayerGroup | null>(null)
+  const roadLayerRef   = useRef<L.LayerGroup | null>(null)
+  // Track which day's road is currently drawn so we don't refetch unnecessarily
+  const drawnRoadDayRef = useRef<number | null>(null)
 
   const { outlets, dayRoutes, activeDay, settings, setSelectedOutletId, mode } = useStore()
 
@@ -77,43 +75,48 @@ export default function MapView() {
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '© OpenStreetMap © CARTO', maxZoom: 19,
     }).addTo(map)
-    layersRef.current  = L.layerGroup().addTo(map)
-    roadLayerRef.current = L.layerGroup().addTo(map)
+    markerLayerRef.current = L.layerGroup().addTo(map)
+    roadLayerRef.current   = L.layerGroup().addTo(map)
     mapRef.current = map
     return () => { map.remove(); mapRef.current = null }
   }, [])
 
-  const drawRoadLines = useCallback(async () => {
-    const map       = mapRef.current
+  // Draw road only for the active day, on demand
+  const drawRoadForActiveDay = useCallback(async () => {
     const roadLayer = roadLayerRef.current
-    if (!map || !roadLayer || !settings) return
+    const map       = mapRef.current
+    if (!roadLayer || !map || !settings) return
+
     roadLayer.clearLayers()
+    drawnRoadDayRef.current = null
 
-    const daysToRoad = activeDay
-      ? dayRoutes.filter((d) => d.day === activeDay)
-      : dayRoutes
+    if (!activeDay) return  // no day selected — no road drawn
 
-    for (const dr of daysToRoad) {
-      if (dr.stops.length < 1) continue
-      const color   = getDayColor(dr.day)
-      const isAct   = !activeDay || activeDay === dr.day
-      const wh      = { lat: settings.warehouse_lat, lon: settings.warehouse_lon }
-      const waypts  = [wh, ...dr.stops.map((s) => ({ lat: s.lat, lon: s.lon })), wh]
-      const roadPts = await getRoadPolyline(waypts)
+    const dr = dayRoutes.find((d) => d.day === activeDay)
+    if (!dr || dr.stops.length < 1) return
 
-      L.polyline(roadPts, {
-        color,
-        weight:    isAct ? 4 : 1.5,
-        opacity:   isAct ? 0.9 : 0.2,
-        dashArray: isAct ? undefined : '5,5',
-      }).addTo(roadLayer)
-    }
-  }, [dayRoutes, activeDay, settings])
+    const color  = getDayColor(dr.day)
+    const wh     = { lat: settings.warehouse_lat, lon: settings.warehouse_lon }
+    const waypts = [wh, ...dr.stops.map((s) => ({ lat: s.lat, lon: s.lon })), wh]
 
-  // Redraw markers + polygons when state changes
+    // Show a dashed placeholder immediately while road loads
+    const straight = waypts.map((w): L.LatLngTuple => [w.lat, w.lon])
+    const placeholder = L.polyline(straight, {
+      color, weight: 2, opacity: 0.3, dashArray: '6,4',
+    }).addTo(roadLayer)
+
+    const roadPts = await getRoadPolyline(waypts)
+
+    // Remove placeholder and draw real road
+    placeholder.remove()
+    L.polyline(roadPts, { color, weight: 4, opacity: 0.9 }).addTo(roadLayer)
+    drawnRoadDayRef.current = activeDay
+  }, [activeDay, dayRoutes, settings])
+
+  // Redraw markers whenever routes/outlets change
   useEffect(() => {
     const map    = mapRef.current
-    const layers = layersRef.current
+    const layers = markerLayerRef.current
     if (!map || !layers) return
     layers.clearLayers()
 
@@ -124,7 +127,7 @@ export default function MapView() {
         .addTo(layers)
     }
 
-    // No routes — dots only
+    // No routes yet — just dots
     if (dayRoutes.length === 0) {
       outlets.forEach((o) => {
         L.marker([o.latitude, o.longitude], { icon: dotIcon('#64748b') })
@@ -132,21 +135,25 @@ export default function MapView() {
           .addTo(layers)
       })
       if (outlets.length > 0) {
-        map.fitBounds(L.latLngBounds(outlets.map((o) => [o.latitude, o.longitude] as L.LatLngTuple)), { padding: [40, 40] })
+        map.fitBounds(
+          L.latLngBounds(outlets.map((o) => [o.latitude, o.longitude] as L.LatLngTuple)),
+          { padding: [40, 40] }
+        )
       }
       return
     }
 
-    // Draw markers
-    const daysToShow = activeDay ? dayRoutes.filter((d) => d.day === activeDay) : dayRoutes
-    daysToShow.forEach((dr) => {
+    // Draw all day markers
+    dayRoutes.forEach((dr) => {
       const color = getDayColor(dr.day)
       const isAct = !activeDay || activeDay === dr.day
+
       dr.stops.forEach((stop) => {
         const outlet  = outlets.find((o) => o.id === stop.id)
         const repName = useStore.getState().salesReps.find((r) => r.id === dr.salesRepId)?.name
+
         L.marker([stop.lat, stop.lon], {
-          icon:    isAct && activeDay ? numberedIcon(stop.sequence, color) : dotIcon(color, isAct ? 1 : 0.3),
+          icon:         isAct && activeDay ? numberedIcon(stop.sequence, color) : dotIcon(color, isAct ? 1 : 0.25),
           zIndexOffset: isAct ? 100 : 0,
         })
           .bindPopup(`
@@ -154,7 +161,9 @@ export default function MapView() {
               <div style="font-weight:600;margin-bottom:4px">${stop.name}</div>
               ${outlet?.land_mark    ? `<div style="color:#64748b;font-size:12px">📍 ${outlet.land_mark}</div>`    : ''}
               ${outlet?.phone_number ? `<div style="color:#64748b;font-size:12px">📞 ${outlet.phone_number}</div>` : ''}
-              <div style="color:#64748b;font-size:12px;margin-top:4px">Day ${dr.day} · Stop #${stop.sequence}${repName ? ` · ${repName}` : ''}</div>
+              <div style="color:#64748b;font-size:12px;margin-top:4px">
+                Day ${dr.day} · Stop #${stop.sequence}${repName ? ` · ${repName}` : ''}
+              </div>
               <button onclick="window.__selectOutlet('${stop.id}')"
                 style="margin-top:8px;width:100%;padding:4px 0;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">
                 Move to another day
@@ -177,22 +186,25 @@ export default function MapView() {
       })
     }
 
-    // Fit to active day
+    // Fit to active day if one is selected
     if (activeDay) {
       const act = dayRoutes.find((d) => d.day === activeDay)
       if (act?.stops.length) {
-        map.fitBounds(L.latLngBounds(act.stops.map((s) => [s.lat, s.lon] as L.LatLngTuple)), { padding: [60, 60] })
+        map.fitBounds(
+          L.latLngBounds(act.stops.map((s) => [s.lat, s.lon] as L.LatLngTuple)),
+          { padding: [60, 60] }
+        )
       }
     }
-
-    // Draw road lines after markers
-    drawRoadLines()
   }, [outlets, dayRoutes, activeDay, settings, mode])
 
-  // Redraw roads when active day changes
+  // Draw road only when active day changes
   useEffect(() => {
-    drawRoadLines()
-  }, [activeDay, drawRoadLines])
+    // Only fetch road if the active day changed to a new day
+    if (activeDay !== drawnRoadDayRef.current) {
+      drawRoadForActiveDay()
+    }
+  }, [activeDay, drawRoadForActiveDay])
 
   useEffect(() => {
     (window as unknown as Record<string, unknown>).__selectOutlet = (id: string) => setSelectedOutletId(id)

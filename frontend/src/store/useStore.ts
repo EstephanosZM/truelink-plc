@@ -41,6 +41,8 @@ interface AppState {
   setMode: (m: 'view' | 'route' | 'draw') => void
 
   searchQuery: string
+  routingMethod:    'nearest_neighbour' | 'two_opt' | 'ortools'
+  setRoutingMethod: (m: 'nearest_neighbour' | 'two_opt' | 'ortools') => void
   setSearchQuery: (q: string) => void
 
   brands: Brand[]
@@ -96,6 +98,8 @@ export const useStore = create<AppState>((set) => ({
   setMode: (m) => set({ mode: m }),
 
   searchQuery: '',
+  routingMethod: (localStorage.getItem('routingMethod') as 'nearest_neighbour'|'two_opt'|'ortools') || 'nearest_neighbour',
+  setRoutingMethod: (m) => { localStorage.setItem('routingMethod', m); set({ routingMethod: m }) },
   setSearchQuery: (q) => set({ searchQuery: q }),
 
   brands: [],
