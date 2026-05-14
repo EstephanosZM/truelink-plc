@@ -114,6 +114,6 @@ setDayNames: (n) => set({ dayNames: n }),
 
   loading: {},
   setLoading: (key, v) => set((s) => ({ loading: { ...s.loading, [key]: v } })),
-  dayNames:    Record<number, string> | null
-setDayNames: (n: Record<number, string>) => void
+  dayNames:    Record<number, string> | null,
+  setDayNames: (n: Record<number, string>) => void
 }))
