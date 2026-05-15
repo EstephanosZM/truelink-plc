@@ -9,21 +9,23 @@ const METHOD_INFO: Record<RoutingMethod, { label: string; desc: string; badge: s
   nearest_neighbour: {
     label: 'Nearest Neighbour',
     desc:  'Always picks the closest next outlet by road. Fast.',
-    badge: 'Fast',
-    color: 'bg-blue-100 text-blue-700',
+    badge: 'Fast',  color: 'bg-blue-100 text-blue-700',
   },
   two_opt: {
     label: '2-Opt',
     desc:  'Nearest neighbour + reversal pass to remove crossovers. 10–20% shorter routes.',
-    badge: 'Better',
-    color: 'bg-green-100 text-green-700',
+    badge: 'Better', color: 'bg-green-100 text-green-700',
   },
   ortools: {
     label: 'OR-Tools',
     desc:  'Google solver. Near-optimal routes. Best quality, takes 15–30s per cluster.',
-    badge: 'Best',
-    color: 'bg-purple-100 text-purple-700',
+    badge: 'Best',  color: 'bg-purple-100 text-purple-700',
   },
+}
+
+interface ExtRep extends SalesRep {
+  pin_code?:      string
+  is_walkin_rep?: boolean
 }
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -44,19 +46,19 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [whError,  setWhError]  = useState('')
 
   // Reps
-  const [repName,    setRepName]    = useState('')
-  const [repPhone,   setRepPhone]   = useState('')
-  const [repTerrId,  setRepTerrId]  = useState('')
-  const [repPin,     setRepPin]     = useState('')
-  const [repTarget,  setRepTarget]  = useState('')
-  const [repErr,     setRepErr]     = useState('')
-  const [repSaving,  setRepSaving]  = useState(false)
-  const [editingRep, setEditingRep] = useState<SalesRep | null>(null)
-  const [showPin,    setShowPin]    = useState<Record<string, boolean>>({})
+  const [repName,     setRepName]     = useState('')
+  const [repPhone,    setRepPhone]    = useState('')
+  const [repTerrId,   setRepTerrId]   = useState('')
+  const [repPin,      setRepPin]      = useState('')
+  const [repTarget,   setRepTarget]   = useState('')
+  const [repWalkIn,   setRepWalkIn]   = useState(false)
+  const [repErr,      setRepErr]      = useState('')
+  const [repSaving,   setRepSaving]   = useState(false)
+  const [editingRep,  setEditingRep]  = useState<ExtRep | null>(null)
+  const [showPin,     setShowPin]     = useState<Record<string, boolean>>({})
 
   const saveWarehouse = async () => {
-    const lat = parseFloat(whLat)
-    const lon = parseFloat(whLon)
+    const lat = parseFloat(whLat); const lon = parseFloat(whLon)
     if (!whName.trim()) return setWhError('Name is required')
     if (isNaN(lat) || isNaN(lon)) return setWhError('Invalid coordinates')
     setWhSaving(true); setWhError('')
@@ -70,48 +72,51 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const addRep = async () => {
     if (!repName.trim()) return setRepErr('Name is required')
-    if (repPin && !/^\d{4}$/.test(repPin)) return setRepErr('PIN must be exactly 4 digits')
+    if (repPin && !/^\d{4}$/.test(repPin)) return setRepErr('PIN must be 4 digits')
     setRepSaving(true); setRepErr('')
     const { data, error } = await supabase.from('sales_representatives').insert({
       name: repName.trim(), phone_number: repPhone.trim() || null,
       territory_id: repTerrId || null, pin_code: repPin || null,
       monthly_target: parseFloat(repTarget) || 0,
+      is_walkin_rep: repWalkIn,
     }).select().single()
     setRepSaving(false)
     if (error) { setRepErr(error.message); return }
     setSalesReps([...salesReps, data])
-    setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget('')
+    setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget(''); setRepWalkIn(false)
   }
 
   const updateRep = async () => {
     if (!editingRep || !repName.trim()) return
-    if (repPin && !/^\d{4}$/.test(repPin)) return setRepErr('PIN must be exactly 4 digits')
+    if (repPin && !/^\d{4}$/.test(repPin)) return setRepErr('PIN must be 4 digits')
     setRepSaving(true); setRepErr('')
     const { data, error } = await supabase.from('sales_representatives').update({
       name: repName.trim(), phone_number: repPhone.trim() || null,
       territory_id: repTerrId || null, pin_code: repPin || null,
       monthly_target: parseFloat(repTarget) || 0,
+      is_walkin_rep: repWalkIn,
     }).eq('id', editingRep.id).select().single()
     setRepSaving(false)
     if (error) { setRepErr(error.message); return }
     setSalesReps(salesReps.map((r) => r.id === data.id ? data : r))
-    setEditingRep(null); setRepName(''); setRepPhone(''); setRepTerrId(''); setRepPin(''); setRepTarget('')
+    setEditingRep(null); setRepName(''); setRepPhone(''); setRepTerrId('')
+    setRepPin(''); setRepTarget(''); setRepWalkIn(false)
   }
 
-  const startEdit = (rep: SalesRep) => {
+  const startEdit = (rep: ExtRep) => {
     setEditingRep(rep); setRepName(rep.name); setRepPhone(rep.phone_number || '')
-    setRepTerrId(rep.territory_id || '')
-    setRepPin((rep as SalesRep & { pin_code?: string }).pin_code || '')
-    setRepTarget(String(rep.monthly_target || '')); setRepErr('')
+    setRepTerrId(rep.territory_id || ''); setRepPin(rep.pin_code || '')
+    setRepTarget(String(rep.monthly_target || '')); setRepWalkIn(rep.is_walkin_rep || false)
+    setRepErr('')
   }
 
   const cancelEdit = () => {
     setEditingRep(null); setRepName(''); setRepPhone('')
-    setRepTerrId(''); setRepPin(''); setRepTarget(''); setRepErr('')
+    setRepTerrId(''); setRepPin(''); setRepTarget(''); setRepWalkIn(false); setRepErr('')
   }
 
   const deleteRep = async (id: string) => {
-    if (!confirm('Remove this sales representative?')) return
+    if (!confirm('Remove this rep?')) return
     await supabase.from('sales_representatives').delete().eq('id', id)
     setSalesReps(salesReps.filter((r) => r.id !== id))
   }
@@ -133,10 +138,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     territories.find((t) => t.id === id)?.name || '—'
 
   const tabs = [
-    { key: 'warehouse', label: 'Warehouse'  },
-    { key: 'reps',      label: 'Sales Reps' },
+    { key: 'warehouse',   label: 'Warehouse'   },
+    { key: 'reps',        label: 'Sales Reps'  },
     { key: 'territories', label: 'Territories' },
-    { key: 'routing',   label: 'Routing'    },
+    { key: 'routing',     label: 'Routing'     },
   ]
 
   return (
@@ -148,14 +153,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">×</button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-slate-200 overflow-x-auto">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key as typeof tab)}
               className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors shrink-0 ${
-                tab === t.key
-                  ? 'border-b-2 border-blue-600 text-blue-600'
-                  : 'text-slate-500 hover:text-slate-700'
+                tab === t.key ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-500 hover:text-slate-700'
               }`}>
               {t.label}
             </button>
@@ -206,24 +208,47 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">4-Digit PIN</label>
-                    <input value={repPin} onChange={(e) => setRepPin(e.target.value.replace(/\D/g,'').slice(0,4))}
+                    <input value={repPin}
+                      onChange={(e) => setRepPin(e.target.value.replace(/\D/g,'').slice(0,4))}
                       placeholder="e.g. 1234" maxLength={4} type="password"
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 tracking-widest" />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Monthly Target (ETB)</label>
-                    <input value={repTarget} onChange={(e) => setRepTarget(e.target.value)} placeholder="50000" type="number"
+                    <input value={repTarget} onChange={(e) => setRepTarget(e.target.value)}
+                      placeholder="50000" type="number"
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Default Territory</label>
                   <select value={repTerrId} onChange={(e) => setRepTerrId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">No default territory</option>
                     {territories.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
+
+                {/* Walk-in toggle */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                  repWalkIn ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-300'
+                }`}>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">Walk-in Rep</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Shows POS screen instead of route dashboard. For warehouse sales only.
+                    </p>
+                  </div>
+                  <button onClick={() => setRepWalkIn(!repWalkIn)}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ml-3 ${
+                      repWalkIn ? 'bg-blue-600' : 'bg-slate-300'
+                    }`}>
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      repWalkIn ? 'translate-x-5' : 'translate-x-0.5'
+                    }`} />
+                  </button>
+                </div>
+
                 {repErr && <p className="text-sm text-red-600">{repErr}</p>}
                 <div className="flex gap-2">
                   {editingRep && (
@@ -238,43 +263,47 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
 
               <div className="divide-y divide-slate-100">
-                {salesReps.map((r) => {
-                  const rep = r as SalesRep & { pin_code?: string }
-                  return (
-                    <div key={r.id} className="flex items-center justify-between py-3 gap-2">
-                      <div className="flex-1 min-w-0">
+                {(salesReps as ExtRep[]).map((r) => (
+                  <div key={r.id} className="flex items-center justify-between py-3 gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-slate-900">{r.name}</p>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          {r.phone_number && <p className="text-xs text-slate-500">📞 {r.phone_number}</p>}
-                          {r.territory_id && <p className="text-xs text-slate-500">📍 {getTerritoryName(r.territory_id)}</p>}
-                          {rep.pin_code ? (
-                            <div className="flex items-center gap-1">
-                              <p className="text-xs text-slate-500">PIN: {showPin[r.id] ? rep.pin_code : '••••'}</p>
-                              <button onClick={() => setShowPin((p) => ({ ...p, [r.id]: !p[r.id] }))}
-                                className="text-xs text-slate-400 hover:text-slate-600">
-                                {showPin[r.id] ? '🙈' : '👁'}
-                              </button>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-amber-500">⚠ No PIN</p>
-                          )}
-                        </div>
+                        {r.is_walkin_rep && (
+                          <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full font-medium">
+                            Walk-in
+                          </span>
+                        )}
                       </div>
-                      <div className="flex gap-2 shrink-0">
-                        <button onClick={() => startEdit(r)}
-                          className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">Edit</button>
-                        <button onClick={() => deleteRep(r.id)}
-                          className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">Remove</button>
+                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                        {r.phone_number  && <p className="text-xs text-slate-500">📞 {r.phone_number}</p>}
+                        {r.territory_id  && <p className="text-xs text-slate-500">📍 {getTerritoryName(r.territory_id)}</p>}
+                        {r.pin_code ? (
+                          <div className="flex items-center gap-1">
+                            <p className="text-xs text-slate-500">PIN: {showPin[r.id] ? r.pin_code : '••••'}</p>
+                            <button onClick={() => setShowPin((p) => ({ ...p, [r.id]: !p[r.id] }))}
+                              className="text-xs text-slate-400 hover:text-slate-600">
+                              {showPin[r.id] ? '🙈' : '👁'}
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-amber-500">⚠ No PIN</p>
+                        )}
                       </div>
                     </div>
-                  )
-                })}
+                    <div className="flex gap-2 shrink-0">
+                      <button onClick={() => startEdit(r)}
+                        className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">Edit</button>
+                      <button onClick={() => deleteRep(r.id)}
+                        className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50">Remove</button>
+                    </div>
+                  </div>
+                ))}
                 {!salesReps.length && <p className="text-sm text-slate-400 py-4 text-center">No sales reps added yet</p>}
               </div>
             </div>
           )}
 
-          {/* ── Territories (proximity) ── */}
+          {/* ── Territories ── */}
           {tab === 'territories' && (
             <div className="space-y-3">
               <p className="text-xs text-slate-500 mb-3">
@@ -302,64 +331,48 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* ── Routing Method ── */}
+          {/* ── Routing ── */}
           {tab === 'routing' && (
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-medium text-slate-900 mb-1">Route Optimization Method</p>
                 <p className="text-xs text-slate-500 mb-4">
-                  This setting applies every time you click Create Route. Choose based on how
-                  much time you are willing to wait for the result.
+                  Applied every time you click Create Route.
                 </p>
               </div>
-
               <div className="space-y-3">
                 {(Object.entries(METHOD_INFO) as [RoutingMethod, typeof METHOD_INFO[RoutingMethod]][]).map(([key, info]) => (
                   <label key={key}
                     className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors ${
-                      routingMethod === key
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      routingMethod === key ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}>
                     <input type="radio" name="routing_method" value={key}
-                      checked={routingMethod === key}
-                      onChange={() => setRoutingMethod(key)}
+                      checked={routingMethod === key} onChange={() => setRoutingMethod(key)}
                       className="mt-0.5 accent-blue-600 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-semibold text-slate-900">{info.label}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${info.color}`}>
-                          {info.badge}
-                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${info.color}`}>{info.badge}</span>
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed">{info.desc}</p>
                     </div>
                   </label>
                 ))}
               </div>
-
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 mt-4">
-                <p className="text-xs font-semibold text-slate-700 mb-2">When to use each method</p>
-                <div className="space-y-2">
-                  {[
-                    { method: 'Nearest Neighbour', when: 'Testing routes quickly or territories with 500+ outlets' },
-                    { method: '2-Opt',             when: 'Daily use — recommended for most situations' },
-                    { method: 'OR-Tools',           when: 'Weekly planning when route quality is the priority' },
-                  ].map((r) => (
-                    <div key={r.method} className="flex gap-2 text-xs">
-                      <span className="text-slate-400 shrink-0">•</span>
-                      <span><span className="font-medium text-slate-700">{r.method}:</span> <span className="text-slate-500">{r.when}</span></span>
-                    </div>
-                  ))}
-                </div>
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 mt-2">
+                <p className="text-xs font-semibold text-slate-700 mb-2">When to use each</p>
+                {[
+                  { m: 'Nearest Neighbour', w: 'Testing routes or 500+ outlets' },
+                  { m: '2-Opt',             w: 'Daily use — recommended' },
+                  { m: 'OR-Tools',          w: 'Weekly planning, quality matters most' },
+                ].map((r) => (
+                  <p key={r.m} className="text-xs text-slate-500 mb-1">
+                    <span className="font-medium text-slate-700">{r.m}:</span> {r.w}
+                  </p>
+                ))}
               </div>
-
-              <p className="text-xs text-slate-400">
-                The selected method is shown in the route History panel so you can compare results.
-              </p>
             </div>
           )}
-
         </div>
       </div>
     </div>
