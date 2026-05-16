@@ -1,37 +1,44 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { useStore } from '../store/useStore'
-import { Brand, Flavor, Product } from '../types'
+
+interface Brand   { id: string; name: string; supplier_name: string | null }
+interface Flavor  { id: string; name: string; brand_id: string }
+interface Product {
+  id: string; name: string; sku_code: string | null; unit_price: number
+  description: string | null; status: string; flavor_id: string; image_url: string | null
+}
 
 export default function ProductsPage() {
-  const { brands, setBrands, flavors, setFlavors, products, setProducts } = useStore()
-
-  const [activeBrand,  setActiveBrand]  = useState<string | null>(null)
-  const [activeFlavor, setActiveFlavor] = useState<string | null>(null)
-  const [view, setView] = useState<'brands' | 'flavors' | 'products' | 'add-brand' | 'add-flavor' | 'add-product' | 'edit-product'>('brands')
-  const [saving,   setSaving]   = useState(false)
-  const [error,    setError]    = useState('')
+  const [brands,      setBrands]      = useState<Brand[]>([])
+  const [flavors,     setFlavors]     = useState<Flavor[]>([])
+  const [products,    setProducts]    = useState<Product[]>([])
+  const [selBrand,    setSelBrand]    = useState<Brand | null>(null)
+  const [selFlavor,   setSelFlavor]   = useState<Flavor | null>(null)
 
   // Brand form
-  const [bName, setBName] = useState('')
+  const [newBrandName,     setNewBrandName]     = useState('')
+  const [newBrandSupplier, setNewBrandSupplier] = useState('')
+  const [editingBrand,     setEditingBrand]     = useState<Brand | null>(null)
+  const [showBrandForm,    setShowBrandForm]    = useState(false)
 
   // Flavor form
-  const [fName, setFName] = useState('')
+  const [newFlavorName,  setNewFlavorName]  = useState('')
+  const [editingFlavor,  setEditingFlavor]  = useState<Flavor | null>(null)
+  const [showFlavorForm, setShowFlavorForm] = useState(false)
 
   // Product form
-  const [pBrandId,  setPBrandId]  = useState('')
-  const [pFlavorId, setPFlavorId] = useState('')
-  const [pName,     setPName]     = useState('')
-  const [pSku,      setPSku]      = useState('')
-  const [pPrice,    setPPrice]    = useState('')
-  const [pDesc,     setPDesc]     = useState('')
-  const [pStatus,   setPStatus]   = useState('active')
-  const [pImageUrl, setPImageUrl] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-
-  // Image upload
-  const [uploading,   setUploading]   = useState(false)
-  const [imagePreview, setImagePreview] = useState('')
+  const [showProductForm, setShowProductForm] = useState(false)
+  const [editingProduct,  setEditingProduct]  = useState<Product | null>(null)
+  const [prodName,        setProdName]        = useState('')
+  const [prodSKU,         setProdSKU]         = useState('')
+  const [prodPrice,       setProdPrice]       = useState('')
+  const [prodDesc,        setProdDesc]        = useState('')
+  const [prodStatus,      setProdStatus]      = useState('active')
+  const [prodImage,       setProdImage]       = useState<File | null>(null)
+  const [prodImageURL,    setProdImageURL]    = useState<string | null>(null)
+  const [uploading,       setUploading]       = useState(false)
+  const [saving,          setSaving]          = useState(false)
+  const [error,           setError]           = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { loadAll() }, [])
@@ -47,392 +54,383 @@ export default function ProductsPage() {
     if (p.data) setProducts(p.data)
   }
 
-  const uploadImage = async (file: File): Promise<string | null> => {
-    setUploading(true)
-    const ext      = file.name.split('.').pop()
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-    const { error } = await supabase.storage
-      .from('product-images')
-      .upload(filename, file, { cacheControl: '3600', upsert: false })
-    setUploading(false)
-    if (error) { setError(`Image upload failed: ${error.message}`); return null }
-    const { data } = supabase.storage.from('product-images').getPublicUrl(filename)
-    return data.publicUrl
-  }
-
-  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // Preview
-    const reader = new FileReader()
-    reader.onload = (ev) => setImagePreview(ev.target?.result as string)
-    reader.readAsDataURL(file)
-    // Upload
-    const url = await uploadImage(file)
-    if (url) setPImageUrl(url)
-  }
-
+  // ── Brand ──────────────────────────────────────────────────────────────────
   const saveBrand = async () => {
-    if (!bName.trim()) return setError('Brand name is required')
-    setSaving(true); setError('')
-    const { data, error } = await supabase.from('brands').insert({ name: bName.trim() }).select().single()
-    setSaving(false)
-    if (error) { setError(error.message); return }
-    setBrands([...brands, data]); setBName(''); setView('brands')
+    if (!newBrandName.trim()) return
+    if (editingBrand) {
+      const { data } = await supabase.from('brands')
+        .update({ name: newBrandName.trim(), supplier_name: newBrandSupplier.trim() || null })
+        .eq('id', editingBrand.id).select().single()
+      if (data) setBrands(brands.map((b) => b.id === data.id ? data : b))
+    } else {
+      const { data } = await supabase.from('brands')
+        .insert({ name: newBrandName.trim(), supplier_name: newBrandSupplier.trim() || null })
+        .select().single()
+      if (data) setBrands([...brands, data])
+    }
+    setNewBrandName(''); setNewBrandSupplier(''); setEditingBrand(null); setShowBrandForm(false)
+  }
+
+  const startEditBrand = (b: Brand) => {
+    setEditingBrand(b); setNewBrandName(b.name); setNewBrandSupplier(b.supplier_name || '')
+    setShowBrandForm(true)
   }
 
   const deleteBrand = async (id: string) => {
     if (!confirm('Delete this brand and all its flavors and products?')) return
     await supabase.from('brands').delete().eq('id', id)
     setBrands(brands.filter((b) => b.id !== id))
-    setFlavors(flavors.filter((f) => f.brand_id !== id))
-    setProducts(products.filter((p) => p.brand_id !== id))
+    setFlavors(flavors.filter((f) => {
+      const flavorBrandId = flavors.find((fl) => fl.id === f.id)
+      return true
+    }))
+    if (selBrand?.id === id) { setSelBrand(null); setSelFlavor(null) }
   }
 
+  // ── Flavor ────────────────────────────────────────────────────────────────
   const saveFlavor = async () => {
-    if (!fName.trim() || !activeBrand) return setError('Flavor name is required')
-    setSaving(true); setError('')
-    const { data, error } = await supabase.from('flavors')
-      .insert({ name: fName.trim(), brand_id: activeBrand }).select().single()
-    setSaving(false)
-    if (error) { setError(error.message); return }
-    setFlavors([...flavors, data]); setFName(''); setView('flavors')
+    if (!newFlavorName.trim() || !selBrand) return
+    if (editingFlavor) {
+      const { data } = await supabase.from('flavors')
+        .update({ name: newFlavorName.trim() }).eq('id', editingFlavor.id).select().single()
+      if (data) setFlavors(flavors.map((f) => f.id === data.id ? data : f))
+    } else {
+      const { data } = await supabase.from('flavors')
+        .insert({ name: newFlavorName.trim(), brand_id: selBrand.id }).select().single()
+      if (data) setFlavors([...flavors, data])
+    }
+    setNewFlavorName(''); setEditingFlavor(null); setShowFlavorForm(false)
   }
 
   const deleteFlavor = async (id: string) => {
-    if (!confirm('Delete this flavor and all its products?')) return
+    if (!confirm('Delete this flavour and all its products?')) return
     await supabase.from('flavors').delete().eq('id', id)
     setFlavors(flavors.filter((f) => f.id !== id))
-    setProducts(products.filter((p) => p.flavor_id !== id))
+    if (selFlavor?.id === id) setSelFlavor(null)
+  }
+
+  // ── Product ───────────────────────────────────────────────────────────────
+  const openNewProduct = () => {
+    setEditingProduct(null); setProdName(''); setProdSKU(''); setProdPrice('')
+    setProdDesc(''); setProdStatus('active'); setProdImage(null); setProdImageURL(null)
+    setError(''); setShowProductForm(true)
+  }
+
+  const openEditProduct = (p: Product) => {
+    setEditingProduct(p); setProdName(p.name); setProdSKU(p.sku_code || '')
+    setProdPrice(String(p.unit_price)); setProdDesc(p.description || '')
+    setProdStatus(p.status); setProdImage(null); setProdImageURL(p.image_url)
+    setError(''); setShowProductForm(true)
+  }
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setProdImage(file)
+    setUploading(true)
+    try {
+      const ext  = file.name.split('.').pop()
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: upErr } = await supabase.storage.from('product-images').upload(path, file)
+      if (upErr) throw upErr
+      const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path)
+      setProdImageURL(publicUrl)
+    } catch (err: unknown) {
+      setError(`Image upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+    setUploading(false)
   }
 
   const saveProduct = async () => {
-    if (!pName.trim() || !pBrandId || !pFlavorId || !pPrice)
-      return setError('Brand, flavor, name and price are required')
+    if (!prodName.trim() || !selFlavor) return setError('Product name required')
+    if (!prodPrice || isNaN(parseFloat(prodPrice))) return setError('Valid price required')
     setSaving(true); setError('')
     const payload = {
-      brand_id: pBrandId, flavor_id: pFlavorId, name: pName.trim(),
-      sku_code: pSku.trim() || null, unit_price: parseFloat(pPrice),
-      description: pDesc.trim() || null, status: pStatus,
-      image_url: pImageUrl || null,
+      name:        prodName.trim(),
+      sku_code:    prodSKU.trim()  || null,
+      unit_price:  parseFloat(prodPrice),
+      description: prodDesc.trim() || null,
+      status:      prodStatus,
+      flavor_id:   selFlavor.id,
+      image_url:   prodImageURL    || null,
     }
-    if (editingId) {
-      const { error } = await supabase.from('products').update(payload).eq('id', editingId)
-      if (!error) setProducts(products.map((p) => p.id === editingId ? { ...p, ...payload } as Product : p))
-      else setError(error.message)
+    if (editingProduct) {
+      const { data } = await supabase.from('products').update(payload).eq('id', editingProduct.id).select().single()
+      if (data) setProducts(products.map((p) => p.id === data.id ? data : p))
     } else {
-      const { data, error } = await supabase.from('products').insert(payload).select().single()
-      if (!error && data) setProducts([...products, data])
-      else if (error) setError(error.message)
+      const { data } = await supabase.from('products').insert(payload).select().single()
+      if (data) setProducts([...products, data])
     }
-    setSaving(false)
-    if (!error) {
-      setPName(''); setPSku(''); setPPrice(''); setPDesc('')
-      setPImageUrl(''); setImagePreview(''); setEditingId(null)
-      setView('products')
-    }
-  }
-
-  const editProduct = (p: Product & { image_url?: string }) => {
-    setEditingId(p.id); setPBrandId(p.brand_id); setPFlavorId(p.flavor_id)
-    setPName(p.name); setPSku(p.sku_code || ''); setPPrice(String(p.unit_price))
-    setPDesc(p.description || ''); setPStatus(p.status)
-    setPImageUrl(p.image_url || ''); setImagePreview(p.image_url || '')
-    setView('edit-product')
+    setSaving(false); setShowProductForm(false)
   }
 
   const deleteProduct = async (id: string) => {
     if (!confirm('Delete this product?')) return
     await supabase.from('products').delete().eq('id', id)
     setProducts(products.filter((p) => p.id !== id))
+    if (showProductForm && editingProduct?.id === id) setShowProductForm(false)
   }
 
-  const brandFlavors   = flavors.filter((f) => f.brand_id === activeBrand)
-  const flavorProducts = products.filter((p) => p.flavor_id === activeFlavor) as (Product & { image_url?: string })[]
-  const formFlavors    = flavors.filter((f) => f.brand_id === pBrandId)
+  const brandFlavors   = flavors.filter((f) => f.brand_id === selBrand?.id)
+  const flavorProducts = products.filter((p) => p.flavor_id === selFlavor?.id)
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Left panel */}
-      <div className="w-56 bg-white border-r border-slate-200 flex flex-col overflow-y-auto shrink-0">
-        <div className="p-4 border-b border-slate-200 flex-1">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Brands</p>
-          {brands.map((b) => (
-            <div key={b.id}>
-              <button
-                onClick={() => { setActiveBrand(b.id); setActiveFlavor(null); setView('flavors') }}
-                className={`w-full text-left px-2 py-1.5 rounded-lg text-sm mb-0.5 transition-colors ${
-                  activeBrand === b.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700 hover:bg-slate-50'
-                }`}>
-                {b.name}
-              </button>
-              {activeBrand === b.id && brandFlavors.map((f) => (
-                <button key={f.id}
-                  onClick={() => { setActiveFlavor(f.id); setView('products') }}
-                  className={`w-full text-left pl-6 pr-2 py-1 rounded-lg text-xs mb-0.5 transition-colors ${
-                    activeFlavor === f.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600 hover:bg-slate-50'
-                  }`}>
-                  {f.name}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="p-4">
-          <button onClick={() => { setView('add-brand'); setError('') }}
-            className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-xs text-slate-500 hover:bg-slate-50 hover:border-slate-400 transition-colors">
-            + Add Brand
-          </button>
-        </div>
-      </div>
+    <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-xl font-semibold text-slate-900 mb-6">Products</h1>
 
-      {/* Main */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {error && <div className="mb-4 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg">{error}</div>}
-
-        {/* Brands list */}
-        {view === 'brands' && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Brands</h2>
+        <div className="flex gap-5">
+          {/* ── Left panel — Brands + Flavors ── */}
+          <div className="w-64 shrink-0 space-y-4">
+            {/* Brands */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>{['Brand','Flavors','Products',''].map((h) =>
-                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-600">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {brands.map((b) => (
-                    <tr key={b.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-medium text-slate-900">{b.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{flavors.filter((f) => f.brand_id === b.id).length}</td>
-                      <td className="px-4 py-3 text-slate-600">{products.filter((p) => p.brand_id === b.id).length}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteBrand(b.id)} className="text-xs text-red-500 hover:text-red-700">Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!brands.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400">No brands yet</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+                <p className="text-sm font-semibold text-slate-900">Brands</p>
+                <button onClick={() => { setShowBrandForm(true); setEditingBrand(null); setNewBrandName(''); setNewBrandSupplier('') }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Add</button>
+              </div>
 
-        {/* Add brand */}
-        {view === 'add-brand' && (
-          <div className="max-w-sm">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Add Brand</h2>
-            <input value={bName} onChange={(e) => setBName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-              placeholder="e.g. Sunchips" />
-            <div className="flex gap-3">
-              <button onClick={() => setView('brands')} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
-              <button onClick={saveBrand} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save Brand'}
-              </button>
-            </div>
-          </div>
-        )}
+              {showBrandForm && (
+                <div className="p-3 bg-slate-50 border-b border-slate-200 space-y-2">
+                  <input value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)}
+                    placeholder="Brand name *"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input value={newBrandSupplier} onChange={(e) => setNewBrandSupplier(e.target.value)}
+                    placeholder="Supplier name (optional)"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShowBrandForm(false); setEditingBrand(null) }}
+                      className="flex-1 py-1.5 border border-slate-300 rounded-lg text-xs hover:bg-slate-100">Cancel</button>
+                    <button onClick={saveBrand} disabled={!newBrandName.trim()}
+                      className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium disabled:opacity-50">
+                      {editingBrand ? 'Update' : 'Add Brand'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
-        {/* Flavors list */}
-        {view === 'flavors' && activeBrand && (
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {brands.find((b) => b.id === activeBrand)?.name} — Flavors
-              </h2>
-              <button onClick={() => { setView('add-flavor'); setError('') }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Add Flavor</button>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>{['Flavor','Products',''].map((h) =>
-                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-600">{h}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {brandFlavors.map((f) => (
-                    <tr key={f.id} className="hover:bg-slate-50 cursor-pointer"
-                      onClick={() => { setActiveFlavor(f.id); setView('products') }}>
-                      <td className="px-4 py-3 font-medium text-slate-900">{f.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{products.filter((p) => p.flavor_id === f.id).length}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={(e) => { e.stopPropagation(); deleteFlavor(f.id) }}
-                          className="text-xs text-red-500 hover:text-red-700">Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!brandFlavors.length && <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400">No flavors yet</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Add flavor */}
-        {view === 'add-flavor' && (
-          <div className="max-w-sm">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Add Flavor</h2>
-            <p className="text-sm text-slate-600 mb-3">{brands.find((b) => b.id === activeBrand)?.name}</p>
-            <input value={fName} onChange={(e) => setFName(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-              placeholder="e.g. Paprika" />
-            <div className="flex gap-3">
-              <button onClick={() => setView('flavors')} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
-              <button onClick={saveFlavor} disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save Flavor'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Products list */}
-        {view === 'products' && activeFlavor && (
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {flavors.find((f) => f.id === activeFlavor)?.name} — Products
-              </h2>
-              <button onClick={() => {
-                setEditingId(null); setPBrandId(activeBrand || ''); setPFlavorId(activeFlavor || '')
-                setPName(''); setPSku(''); setPPrice(''); setPDesc(''); setPStatus('active')
-                setPImageUrl(''); setImagePreview(''); setView('add-product'); setError('')
-              }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ Add Product</button>
-            </div>
-
-            {/* Product cards with images */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {flavorProducts.map((p) => (
-                <div key={p.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                  {p.image_url ? (
-                    <img src={p.image_url} alt={p.name}
-                      className="w-full h-36 object-cover bg-slate-100" />
-                  ) : (
-                    <div className="w-full h-36 bg-slate-100 flex items-center justify-center">
-                      <span className="text-4xl">📦</span>
-                    </div>
-                  )}
-                  <div className="p-4">
-                    <p className="font-medium text-slate-900 text-sm truncate">{p.name}</p>
-                    {p.sku_code && <p className="text-xs text-slate-500 mb-1">{p.sku_code}</p>}
-                    <p className="text-blue-600 font-semibold text-sm">ETB {p.unit_price.toFixed(2)}</p>
-                    <div className="flex items-center justify-between mt-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
-                      }`}>{p.status}</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => editProduct(p)} className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
-                        <button onClick={() => deleteProduct(p.id)} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+              <div className="divide-y divide-slate-100">
+                {brands.map((b) => (
+                  <div key={b.id}
+                    onClick={() => { setSelBrand(b); setSelFlavor(null); setShowProductForm(false) }}
+                    className={`px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors ${selBrand?.id === b.id ? 'bg-blue-50 border-l-2 border-blue-600' : ''}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-900 truncate">{b.name}</p>
+                        {b.supplier_name && (
+                          <p className="text-xs text-slate-400 truncate mt-0.5">{b.supplier_name}</p>
+                        )}
+                        <p className="text-xs text-slate-400">
+                          {flavors.filter((f) => f.brand_id === b.id).length} flavour(s)
+                        </p>
+                      </div>
+                      <div className="flex gap-1 ml-2 shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); startEditBrand(b) }}
+                          className="text-xs text-blue-500 hover:text-blue-700 px-1">✏</button>
+                        <button onClick={(e) => { e.stopPropagation(); deleteBrand(b.id) }}
+                          className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              {!flavorProducts.length && (
-                <div className="col-span-3 text-center py-8 text-slate-400">No products yet</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Add / Edit product */}
-        {(view === 'add-product' || view === 'edit-product') && (
-          <div className="max-w-md">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">{editingId ? 'Edit' : 'Add'} Product</h2>
-            <div className="space-y-4">
-
-              {/* Image upload */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Product Image</label>
-                <div
-                  onClick={() => fileRef.current?.click()}
-                  className="w-full h-40 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors overflow-hidden"
-                >
-                  {imagePreview ? (
-                    <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                  ) : (
-                    <>
-                      <span className="text-3xl mb-2">📷</span>
-                      <p className="text-sm text-slate-500">Click to upload image</p>
-                      <p className="text-xs text-slate-400 mt-1">JPG, PNG, WEBP</p>
-                    </>
-                  )}
-                </div>
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-                {uploading && <p className="text-xs text-blue-600 mt-1">Uploading image…</p>}
-                {imagePreview && (
-                  <button onClick={() => { setPImageUrl(''); setImagePreview('') }}
-                    className="text-xs text-red-500 mt-1 hover:text-red-700">Remove image</button>
+                ))}
+                {!brands.length && (
+                  <p className="px-4 py-6 text-xs text-slate-400 text-center">No brands yet</p>
                 )}
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Brand</label>
-                  <select value={pBrandId} onChange={(e) => { setPBrandId(e.target.value); setPFlavorId('') }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                    <option value="">Select brand</option>
-                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Flavor</label>
-                  <select value={pFlavorId} onChange={(e) => setPFlavorId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                    <option value="">Select flavor</option>
-                    {formFlavors.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Product Name</label>
-                <input value={pName} onChange={(e) => setPName(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g. Sunchips Paprika 28g" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">SKU Code</label>
-                  <input value={pSku} onChange={(e) => setPSku(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Optional" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Unit Price (ETB)</label>
-                  <input type="number" min={0} step="0.01" value={pPrice} onChange={(e) => setPPrice(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="0.00" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea value={pDesc} onChange={(e) => setPDesc(e.target.value)} rows={2}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  placeholder="Optional" />
-              </div>
-
-              <div className="flex gap-4">
-                {['active','inactive'].map((s) => (
-                  <label key={s} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                    <input type="radio" value={s} checked={pStatus === s} onChange={() => setPStatus(s)} className="accent-blue-600" />
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                  </label>
-                ))}
-              </div>
-
-              <div className="flex gap-3">
-                <button onClick={() => setView('products')} className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
-                <button onClick={saveProduct} disabled={saving || uploading}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                  {saving ? 'Saving…' : uploading ? 'Uploading…' : 'Save Product'}
-                </button>
-              </div>
             </div>
+
+            {/* Flavors */}
+            {selBrand && (
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+                  <p className="text-sm font-semibold text-slate-900">Flavours</p>
+                  <button onClick={() => { setShowFlavorForm(true); setEditingFlavor(null); setNewFlavorName('') }}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Add</button>
+                </div>
+
+                {showFlavorForm && (
+                  <div className="p-3 bg-slate-50 border-b border-slate-200 space-y-2">
+                    <input value={newFlavorName} onChange={(e) => setNewFlavorName(e.target.value)}
+                      placeholder="Flavour name"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <div className="flex gap-2">
+                      <button onClick={() => { setShowFlavorForm(false); setEditingFlavor(null) }}
+                        className="flex-1 py-1.5 border border-slate-300 rounded-lg text-xs hover:bg-slate-100">Cancel</button>
+                      <button onClick={saveFlavor} disabled={!newFlavorName.trim()}
+                        className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium disabled:opacity-50">
+                        {editingFlavor ? 'Update' : 'Add'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="divide-y divide-slate-100">
+                  {brandFlavors.map((f) => (
+                    <div key={f.id}
+                      onClick={() => { setSelFlavor(f); setShowProductForm(false) }}
+                      className={`px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors ${selFlavor?.id === f.id ? 'bg-blue-50 border-l-2 border-blue-600' : ''}`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{f.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {products.filter((p) => p.flavor_id === f.id).length} product(s)
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); setEditingFlavor(f); setNewFlavorName(f.name); setShowFlavorForm(true) }}
+                            className="text-xs text-blue-500 hover:text-blue-700 px-1">✏</button>
+                          <button onClick={(e) => { e.stopPropagation(); deleteFlavor(f.id) }}
+                            className="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {!brandFlavors.length && (
+                    <p className="px-4 py-6 text-xs text-slate-400 text-center">No flavours yet</p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* ── Right panel — Products ── */}
+          <div className="flex-1">
+            {!selFlavor ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+                <p className="text-4xl mb-3">📦</p>
+                <p className="text-slate-700 font-medium">Select a brand then a flavour</p>
+                <p className="text-slate-400 text-sm mt-1">Products will appear here</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Header with brand info */}
+                <div className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">{selBrand?.name} — {selFlavor.name}</p>
+                    {selBrand?.supplier_name && (
+                      <p className="text-xs text-slate-500 mt-0.5">Supplier: {selBrand.supplier_name}</p>
+                    )}
+                    <p className="text-xs text-slate-400">{flavorProducts.length} product(s)</p>
+                  </div>
+                  <button onClick={openNewProduct}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+                    + Add Product
+                  </button>
+                </div>
+
+                {/* Product form */}
+                {showProductForm && (
+                  <div className="bg-white rounded-xl border border-blue-300 p-5">
+                    <h3 className="font-semibold text-slate-900 mb-4">
+                      {editingProduct ? 'Edit Product' : 'New Product'}
+                    </h3>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="col-span-2">
+                        <label className="block text-xs text-slate-500 mb-1">Product Name *</label>
+                        <input value={prodName} onChange={(e) => setProdName(e.target.value)}
+                          placeholder="e.g. Sunchips Paprika 28g"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">SKU Code</label>
+                        <input value={prodSKU} onChange={(e) => setProdSKU(e.target.value)}
+                          placeholder="Optional"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Unit Price (ETB) *</label>
+                        <input type="number" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs text-slate-500 mb-1">Description</label>
+                        <input value={prodDesc} onChange={(e) => setProdDesc(e.target.value)}
+                          placeholder="Optional"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Status</label>
+                        <select value={prodStatus} onChange={(e) => setProdStatus(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">Product Image</label>
+                        <div onClick={() => fileRef.current?.click()}
+                          className="w-full h-20 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                          {prodImageURL ? (
+                            <img src={prodImageURL} alt="" className="h-16 w-16 object-contain rounded" />
+                          ) : uploading ? (
+                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <span className="text-xs text-slate-400">Click to upload</span>
+                          )}
+                        </div>
+                        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                      </div>
+                    </div>
+                    {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+                    <div className="flex gap-3">
+                      <button onClick={() => setShowProductForm(false)}
+                        className="flex-1 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">Cancel</button>
+                      <button onClick={saveProduct} disabled={saving || uploading}
+                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                        {saving ? 'Saving…' : editingProduct ? 'Update' : 'Add Product'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Product list */}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>{['Image','Product','SKU','Price','Status',''].map((h) =>
+                        <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-600">{h}</th>)}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {flavorProducts.map((p) => (
+                        <tr key={p.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            {p.image_url ? (
+                              <img src={p.image_url} alt={p.name} className="w-10 h-10 rounded-lg object-cover" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-slate-200 flex items-center justify-center text-lg">📦</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-900">{p.name}</td>
+                          <td className="px-4 py-3 text-slate-500 font-mono text-xs">{p.sku_code || '—'}</td>
+                          <td className="px-4 py-3 font-medium text-slate-900">
+                            ETB {p.unit_price.toLocaleString('en', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
+                            }`}>{p.status}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-2">
+                              <button onClick={() => openEditProduct(p)}
+                                className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
+                              <button onClick={() => deleteProduct(p.id)}
+                                className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {!flavorProducts.length && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No products yet — click + Add Product</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
